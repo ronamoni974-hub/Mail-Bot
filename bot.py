@@ -9,7 +9,7 @@ import string
 import html
 import os
 from flask import Flask
-from datetime import datetime, timedelta
+from datetime import datetime
 
 # --- Configuration ---
 TOKEN = '8572418006:AAEQBCXBPxa35yBiSWeaVWVvLP9N326fJos'
@@ -21,15 +21,14 @@ ADMIN_ID = "6670461311"
 api_data = {
     'tokens': ['td_18c938ad445ea882ebc1110b22723e1ca1ddef7911dde89e80a095f3c2120119'],
     'active_idx': 0,
-    'usage': {},        # কোন টোকেনে কত মেইল তৈরি হয়েছে
-    'exhausted': {}     # যে টোকেনগুলোর লিমিট শেষ: {'token': datetime_exhausted}
+    'usage': {},
+    'exhausted': {}
 }
 api_clients = {}
 
 def restore_apis():
     now = datetime.now()
     for token, exhaust_date in list(api_data['exhausted'].items()):
-        # ৩০ দিন পর API অটোমেটিক আনলক হবে
         if (now - exhaust_date).days >= 30:
             del api_data['exhausted'][token]
             api_data['usage'][token] = 0
@@ -38,7 +37,7 @@ def mark_api_exhausted(token):
     if token not in api_data['exhausted']:
         api_data['exhausted'][token] = datetime.now()
         api_data['usage'][token] = 1000
-        try: bot.send_message(ADMIN_ID, f"⚠️ <b>API Limit Reached!</b>\n\nএকটি API এর ১০০০ মেইলের লিমিট শেষ। অটোমেটিক পরবর্তী API তে সুইচ করা হচ্ছে।")
+        try: bot.send_message(ADMIN_ID, f"⚠️ <b>API Limit Reached!</b>\n\nএকটি API এর ১০০০ মেইলের লিমিট শেষ। পরবর্তী API তে সুইচ করা হচ্ছে।")
         except: pass
 
 def get_active_client():
@@ -61,7 +60,6 @@ def create_mail_with_fallback(clean_name=None):
     for _ in range(len(api_data['tokens'])):
         try:
             client, token = get_active_client()
-            
             if api_data['usage'].get(token, 0) >= 1000:
                 mark_api_exhausted(token)
                 continue
@@ -149,25 +147,40 @@ def get_service_logo(sender):
     if 'steam' in sender_lower: return '🎮 Steam'
     return '🌐 Web Service'
 
-# --- Smart Extractor ---
-def extract_and_format(subject, body):
+# --- Advanced Smart Extractor (Fix for Instagram HTML Mails) ---
+def extract_and_format(subject, text_body, html_body=""):
     subject_text = subject if subject else "No Subject"
-    body_text = body if body else ""
-    clean_body = re.sub(r'<[^>]+>', '', body_text).strip()
-    if not clean_body: clean_body = subject_text 
-        
-    full_text = f"{subject_text} {clean_body}"
-    escaped_body = html.escape(clean_body)
     
-    otp_match = re.search(r'\b(\d{4,8})\b', full_text)
+    # HTML ট্যাগগুলো স্পেস দিয়ে রিপ্লেস করা যেন কোডগুলো আলাদা থাকে
+    clean_html = re.sub(r'<[^>]+>', ' ', str(html_body)) if html_body else ""
+    clean_text = str(text_body) if text_body else ""
+    
+    # কোড খোঁজার জন্য সব টেক্সট একসাথে করা হলো
+    search_text = f"{subject_text} {clean_text} {clean_html}"
+    
+    # ৪ থেকে ৮ ডিজিটের কোড স্ক্যান করা
+    otp_match = re.search(r'\b(\d{4,8})\b', search_text)
     otp_section = ""
     if otp_match:
         otp_section = f"🔑 <b>Verification Code :</b> <code>{otp_match.group(1)}</code>\n\n"
     
-    link_match = re.search(r'(https?://[^\s]+)', full_text)
+    # লিংক স্ক্যান করা
+    link_match = re.search(r'(https?://[^\s\"\'<>]+)', search_text)
     extracted_link = link_match.group(1) if link_match else None
     
+    # মেসেজ বক্সে দেখানোর জন্য বেস্ট টেক্সট সিলেক্ট করা (Instagram Fix)
+    display_body = clean_text.strip()
+    if len(display_body) < 15 and clean_html.strip():
+        # যদি নরমাল বডি ফাঁকা থাকে, তবে HTML বডি থেকে অতিরিক্ত স্পেস মুছে শো করবে
+        display_body = re.sub(r'\s+', ' ', clean_html).strip()
+        
+    if not display_body:
+        display_body = "No Content"
+        
+    escaped_body = html.escape(display_body)
+    # বডির ভেতরে থাকা কোডগুলোকেও ক্লিকেবল করা
     formatted_body = re.sub(r'\b(\d{4,8})\b', r'<code>\1</code>', escaped_body)
+    
     return otp_section, formatted_body, extracted_link
 
 # --- Clean Layout Generators ---
@@ -207,7 +220,12 @@ def auto_check_mail():
                             account['seen_msgs'].add(msg_id)
                             
                             full_msg = temp_client.messages.get(account_id, msg_id)
-                            otp_section, smart_body, verify_link = extract_and_format(full_msg.subject, full_msg.text_body)
+                            
+                            # HTML বডি ফেচ করা হচ্ছে (Fix applied here)
+                            html_body = getattr(full_msg, 'html_body', '')
+                            text_body = full_msg.text_body if full_msg.text_body else ''
+                            
+                            otp_section, smart_body, verify_link = extract_and_format(full_msg.subject, text_body, html_body)
                             
                             sender_info = getattr(full_msg, 'from_address', getattr(full_msg, 'sender', 'Unknown Sender'))
                             service_logo = get_service_logo(sender_info)
@@ -241,7 +259,7 @@ def init_user(message):
             'name': message.from_user.first_name or "Unknown",
             'username': f"@{message.from_user.username}" if message.from_user.username else "N/A",
             'joined': datetime.now().strftime("%Y-%m-%d"),
-            'custom_mail_msgs': [] # স্টোর করার জন্য
+            'custom_mail_msgs': []
         }
 
 # --- Handlers ---
@@ -364,7 +382,6 @@ def process_custom_mail(message):
     try:
         account, used_token = create_mail_with_fallback(clean_name)
         
-        # সফল হলে ডেটা স্টোর
         api_data['usage'][used_token] = api_data['usage'].get(used_token, 0) + 1
         user_data[chat_id]['accounts'].append({
             'account_id': account.id, 'email': account.address, 
@@ -374,7 +391,6 @@ def process_custom_mail(message):
         user_data[chat_id]['total_generated'] += 1
         bot_stats['total_mails_generated'] += 1
         
-        # আগের সব ফেইল্ড এবং চ্যাটের অবাঞ্ছিত মেসেজগুলো ক্লিন করা
         for msg_id in user_data[chat_id].get('custom_mail_msgs', []):
             try: bot.delete_message(chat_id, msg_id)
             except: pass
@@ -466,7 +482,6 @@ def handle_callback(call):
         elif call.data == "admin_users":
             user_list = "👥 <b>Recent Users List:</b>\n\n"
             for uid, data in list(user_data.items())[-20:]:
-                # এখানে ইউজার লিস্টে মেইল কাউন্ট যুক্ত করা হয়েছে
                 user_list += f"• {data['name']} (<code>{uid}</code>) - <b>{data['total_generated']} Mails</b>\n"
             bot.edit_message_text(user_list, chat_id, call.message.message_id, reply_markup=get_back_button())
             
@@ -541,7 +556,7 @@ def broadcast_promo(message, promo_text):
 if __name__ == "__main__":
     threading.Thread(target=run_web_server, daemon=True).start()
     threading.Thread(target=auto_check_mail, daemon=True).start()
-    print("Flawless Pro Bot is Live...")
+    print("Fixed Extractor Bot is Live...")
     while True:
         try: bot.polling(none_stop=True, interval=0, timeout=20)
         except Exception: time.sleep(5)
