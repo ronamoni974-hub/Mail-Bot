@@ -29,15 +29,15 @@ system_data = {'active_promos': {}}
 # --- Web Server (24/7 Hosting) ---
 app = Flask('')
 @app.route('/')
-def home(): return "Pro Mail Bot is Running!"
+def home(): return "Pro Mail Bot is Running 24/7!"
 def run_web_server(): app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 8080)))
 
 # --- Menu Builders ---
 def get_main_menu(chat_id):
     markup = ReplyKeyboardMarkup(resize_keyboard=True, row_width=2)
-    markup.add(KeyboardButton("✨ New Pro Mail"), KeyboardButton("🏠 Dashboard"))
-    markup.add(KeyboardButton("👤 Profile"), KeyboardButton("🗑️ Delete Active"))
-    markup.add(KeyboardButton("⚡ About Bot"))
+    markup.add(KeyboardButton("✨ New Pro Mail"), KeyboardButton("✏️ Custom Mail"))
+    markup.add(KeyboardButton("🏠 Dashboard"), KeyboardButton("🗑️ Delete Active"))
+    markup.add(KeyboardButton("👤 Profile"), KeyboardButton("⚡ About Bot"))
     if str(chat_id) == ADMIN_ID:
         markup.add(KeyboardButton("⚙️ Admin Panel"))
     return markup
@@ -143,12 +143,12 @@ def auto_check_mail():
                                 f"💬 <b>Message Content:</b>\n"
                                 f"<code>{smart_body[:1000]}</code>{'...' if len(smart_body)>1000 else ''}\n\n"
                                 f"━━━━━━━━━━━━━━━━━━━━━━━━\n"
-                                f"⚡ <i>Live synchronization is active...</i>"
+                                f"📡 <i>Live synchronization is active...</i>"
                             )
                             
                             markup = InlineKeyboardMarkup()
                             if verify_link:
-                                markup.add(InlineKeyboardButton("🔗 Verify / Open Link", url=verify_link))
+                                markup.add(InlineKeyboardButton("🔗 Secure Verify / Open Link", url=verify_link))
                             
                             sent_msg = bot.send_message(chat_id, mail_alert, reply_markup=markup, disable_web_page_preview=True)
                             account['msg_ids'].append(sent_msg.message_id)
@@ -193,11 +193,10 @@ def handle_text(message):
     if is_banned(chat_id): return
 
     if text == "✨ New Pro Mail":
-        anim_msg = bot.send_message(chat_id, "<i>⏳ Initializing Protocol...</i>")
+        anim_msg = bot.send_message(chat_id, "<i>⏳ Initializing Protocol... [■□□□]</i>")
         time.sleep(0.3)
-        bot.edit_message_text("<i>🔐 Bypassing Security Servers...</i>", chat_id, anim_msg.message_id)
+        bot.edit_message_text("<i>🔐 Bypassing Security Servers... [■■■□]</i>", chat_id, anim_msg.message_id)
         time.sleep(0.3)
-        bot.edit_message_text("<i>⚙️ Registering Premium Domain...</i>", chat_id, anim_msg.message_id)
         
         try:
             username = ''.join(random.choices(string.ascii_lowercase + string.digits, k=8))
@@ -218,12 +217,16 @@ def handle_text(message):
                 f"📥 <b>Your Secure Address:</b>\n"
                 f"👉 <code>{account.address}</code> 👈\n"
                 f"━━━━━━━━━━━━━━━━━━━━━━━━\n"
-                f"🟢 <i>Status: Ultra-Fast Listening Mode ON</i>\n"
-                f"যেকোনো সাইটে এই মেইলটি ব্যবহার করুন, ইনবক্স এখানেই শো করবে।"
+                f"📡 <b>Live Sync:</b> Active 🟢\n"
+                f"🔄 <i>Auto-refreshing & listening for incoming mail...</i>"
             )
             bot.edit_message_text(dashboard_text, chat_id, anim_msg.message_id)
         except Exception as e:
             bot.edit_message_text(f"❌ Error: {str(e)}", chat_id, anim_msg.message_id)
+
+    elif text == "✏️ Custom Mail":
+        msg = bot.send_message(chat_id, "✏️ <b>Custom Mail Creation</b>\n\nআপনি মেইলের শুরুতে কী নাম দিতে চান তা লিখুন (যেমন: <code>walid</code> বা <code>exampro</code>):", reply_markup=InlineKeyboardMarkup().add(InlineKeyboardButton("❌ Cancel", callback_data="cancel_custom")))
+        bot.register_next_step_handler(msg, process_custom_mail)
 
     elif text == "🏠 Dashboard":
         accounts = user_data[chat_id]['accounts']
@@ -271,11 +274,11 @@ def handle_text(message):
 
     elif text == "⚡ About Bot":
         about_text = (
-            "🚀 <b>Premium Temp Mail Bot v5.0</b>\n"
+            "🚀 <b>Premium Temp Mail Bot v6.0</b>\n"
             "━━━━━━━━━━━━━━━━━━━━━━━━\n"
             "• Engine: Mail.td Pro API\n"
             "• Performance: Zero-Lag Sync\n"
-            "• Features: Smart UI, Brand Detector\n"
+            "• Features: Custom Mail, Smart UI, Brand Detector\n"
             "• Designed & Managed by: <a href='https://t.me/Ad_Walid'>Md Walid</a>\n"
             "━━━━━━━━━━━━━━━━━━━━━━━━\n"
             "<i>Crafted with modern interface aesthetics.</i>"
@@ -285,19 +288,67 @@ def handle_text(message):
     elif text == "⚙️ Admin Panel" and chat_id == ADMIN_ID:
         bot.send_message(chat_id, "⚙️ <b>Advanced Admin Control Panel</b>\nবেছে নিন আপনি কী করতে চান:", reply_markup=get_admin_menu())
 
+# --- Custom Mail Processing ---
+def process_custom_mail(message):
+    chat_id = str(message.chat.id)
+    if message.text.startswith('/'): return
+        
+    requested_name = message.text.lower().strip()
+    clean_name = re.sub(r'[^a-z0-9]', '', requested_name)
+    
+    if len(clean_name) < 3:
+        bot.send_message(chat_id, "⚠️ নাম কমপক্ষে ৩ অক্ষরের হতে হবে। আবার চেষ্টা করুন।")
+        return
+        
+    anim_msg = bot.send_message(chat_id, "<i>⏳ Checking domain availability... [■■□□]</i>")
+    
+    try:
+        domains = mail_client.accounts.list_domains()
+        domain_name = domains[0].domain if hasattr(domains[0], 'domain') else domains[0]
+        email_address = f"{clean_name}@{domain_name}"
+        
+        account = mail_client.accounts.create(email_address, password="propassword123")
+        
+        user_data[chat_id]['accounts'].append({'account_id': account.id, 'email': account.address, 'seen_msgs': set(), 'msg_ids': [anim_msg.message_id]})
+        user_data[chat_id]['active_index'] = len(user_data[chat_id]['accounts']) - 1
+        user_data[chat_id]['total_generated'] += 1
+        bot_stats['total_mails_generated'] += 1
+        
+        dashboard_text = (
+            f"🎉 <b>Custom Mail Activated!</b>\n"
+            f"━━━━━━━━━━━━━━━━━━━━━━━━\n"
+            f"📥 <b>Your Secure Address:</b>\n"
+            f"👉 <code>{account.address}</code> 👈\n"
+            f"━━━━━━━━━━━━━━━━━━━━━━━━\n"
+            f"📡 <b>Live Sync:</b> Active 🟢\n"
+            f"🔄 <i>Auto-refreshing & listening for incoming mail...</i>"
+        )
+        bot.edit_message_text(dashboard_text, chat_id, anim_msg.message_id)
+        
+    except Exception as e:
+        error_msg = str(e)
+        if "already exists" in error_msg.lower() or "taken" in error_msg.lower() or "400" in error_msg.lower():
+            bot.edit_message_text(f"❌ <b>দুঃখিত!</b> <code>{clean_name}</code> নামটি আগে থেকেই কেউ নিয়ে নিয়েছে বা অবৈধ। অন্য নাম দিয়ে চেষ্টা করুন।", chat_id, anim_msg.message_id)
+        else:
+            bot.edit_message_text(f"❌ Error: {error_msg}", chat_id, anim_msg.message_id)
+
 # --- Callbacks & Dynamic Admin Menu ---
 @bot.callback_query_handler(func=lambda call: True)
 def handle_callback(call):
     chat_id = str(call.message.chat.id)
     if is_banned(chat_id): return
     
-    if call.data.startswith('switch_'):
+    if call.data == "cancel_custom":
+        bot.clear_step_handler_by_chat_id(call.message.chat.id)
+        bot.edit_message_text("❌ Custom Mail creation cancelled.", chat_id, call.message.message_id)
+
+    elif call.data.startswith('switch_'):
         idx = int(call.data.split('_')[1])
         if idx < len(user_data.get(chat_id, {}).get('accounts', [])):
             user_data[chat_id]['active_index'] = idx
             active_email = user_data[chat_id]['accounts'][idx]['email']
             bot.answer_callback_query(call.id, "Switched successfully!")
-            bot.edit_message_text(f"✅ <b>Successfully Switched!</b>\n\n🟢 <b>Active Mail:</b> <code>{active_email}</code>\n<i>Live synchronization active.</i>", chat_id, call.message.message_id)
+            bot.edit_message_text(f"✅ <b>Successfully Switched!</b>\n\n🟢 <b>Active Mail:</b> <code>{active_email}</code>\n📡 <i>Live synchronization is running...</i>", chat_id, call.message.message_id)
             
     elif chat_id == ADMIN_ID:
         if call.data == "admin_back":
