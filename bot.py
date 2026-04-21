@@ -66,20 +66,20 @@ def is_banned(chat_id):
 # --- Service Logo Detector ---
 def get_service_logo(sender):
     sender_lower = str(sender).lower()
-    if 'facebook' in sender_lower or 'fb' in sender_lower: return '📘 <b>Facebook</b>'
-    if 'instagram' in sender_lower or 'ig' in sender_lower: return '📸 <b>Instagram</b>'
-    if 'youtube' in sender_lower or 'yt' in sender_lower: return '▶️ <b>YouTube</b>'
-    if 'twitter' in sender_lower or 'x.com' in sender_lower: return '🕢 <b>X (Twitter)</b>'
-    if 'google' in sender_lower or 'gmail' in sender_lower: return '🇬 <b>Google</b>'
-    if 'tiktok' in sender_lower: return '🎵 <b>TikTok</b>'
-    if 'netflix' in sender_lower: return '🎬 <b>Netflix</b>'
-    if 'amazon' in sender_lower: return '🛒 <b>Amazon</b>'
-    if 'apple' in sender_lower: return '🍎 <b>Apple</b>'
-    if 'microsoft' in sender_lower: return '🪟 <b>Microsoft</b>'
-    if 'spotify' in sender_lower: return '🎧 <b>Spotify</b>'
-    if 'discord' in sender_lower: return '👾 <b>Discord</b>'
-    if 'steam' in sender_lower: return '🎮 <b>Steam</b>'
-    return '🌐 <b>Web Service</b>'
+    if 'facebook' in sender_lower or 'fb' in sender_lower: return '📘 Facebook'
+    if 'instagram' in sender_lower or 'ig' in sender_lower: return '📸 Instagram'
+    if 'youtube' in sender_lower or 'yt' in sender_lower: return '▶️ YouTube'
+    if 'twitter' in sender_lower or 'x.com' in sender_lower: return '🕢 X (Twitter)'
+    if 'google' in sender_lower or 'gmail' in sender_lower: return '🇬 Google'
+    if 'tiktok' in sender_lower: return '🎵 TikTok'
+    if 'netflix' in sender_lower: return '🎬 Netflix'
+    if 'amazon' in sender_lower: return '🛒 Amazon'
+    if 'apple' in sender_lower: return '🍎 Apple'
+    if 'microsoft' in sender_lower: return '🪟 Microsoft'
+    if 'spotify' in sender_lower: return '🎧 Spotify'
+    if 'discord' in sender_lower: return '👾 Discord'
+    if 'steam' in sender_lower: return '🎮 Steam'
+    return '🌐 Web Service'
 
 # --- Smart Extractor ---
 def extract_and_format(subject, body):
@@ -97,9 +97,8 @@ def extract_and_format(subject, body):
     otp_section = ""
     if otp_match:
         otp_section = (
-            f"<blockquote>🔐 <b>Verification Code:</b>\n"
-            f"👉 <code>{otp_match.group(1)}</code> 👈\n"
-            f"<i>(Tap to copy instantly)</i></blockquote>\n\n"
+            f"🔑 <b>Verification Code :</b>\n"
+            f"<code>{otp_match.group(1)}</code>\n\n"
         )
     
     link_match = re.search(r'(https?://[^\s]+)', full_text)
@@ -107,6 +106,19 @@ def extract_and_format(subject, body):
     
     formatted_body = re.sub(r'\b(\d{4,8})\b', r'<code>\1</code>', escaped_body)
     return otp_section, formatted_body, extracted_link
+
+# --- Clean Layout Generators ---
+def generate_mail_layout(email_address):
+    layout = (
+        f"✅ <b>Mail Assigned Successfully !</b>\n\n"
+        f"📧 <b>Address :</b> <code>{email_address}</code>\n\n"
+        f"📡 <b>Status :</b> Live Sync Active\n\n"
+        f"<blockquote>•  Waiting for new messages ⬇️</blockquote>"
+    )
+    markup = InlineKeyboardMarkup(row_width=2)
+    markup.add(InlineKeyboardButton("🔄 Switch Mail", callback_data="quick_switch"),
+               InlineKeyboardButton("🔄 Force Fetch", callback_data="force_fetch"))
+    return layout, markup
 
 # --- Non-Blocking Auto Checker Engine ---
 def auto_check_mail():
@@ -133,17 +145,13 @@ def auto_check_mail():
                             service_logo = get_service_logo(sender_info)
                             
                             mail_alert = (
-                                f"📥 <b>NEW MAIL ARRIVED!</b>\n"
-                                f"━━━━━━━━━━━━━━━━━━━━━━━━\n"
-                                f"🏢 <b>From:</b> {service_logo} <i>({html.escape(sender_info)})</i>\n"
-                                f"📧 <b>To:</b> <code>{account['email']}</code>\n"
-                                f"📌 <b>Subject:</b> {html.escape(full_msg.subject or 'No Subject')}\n"
-                                f"━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+                                f"✅ <b>New Message Received !</b>\n\n"
+                                f"🏢 <b>From :</b> {service_logo} <i>({html.escape(sender_info)})</i>\n\n"
+                                f"📧 <b>To :</b> <code>{account['email']}</code>\n\n"
+                                f"📌 <b>Subject :</b> {html.escape(full_msg.subject or 'No Subject')}\n\n"
                                 f"{otp_section}"
-                                f"💬 <b>Message Content:</b>\n"
-                                f"<code>{smart_body[:1000]}</code>{'...' if len(smart_body)>1000 else ''}\n\n"
-                                f"━━━━━━━━━━━━━━━━━━━━━━━━\n"
-                                f"📡 <i>Live synchronization is active...</i>"
+                                f"<blockquote>💬 <b>Message :</b>\n"
+                                f"{smart_body[:1000]}{'...' if len(smart_body)>1000 else ''}</blockquote>"
                             )
                             
                             markup = InlineKeyboardMarkup()
@@ -176,12 +184,10 @@ def send_welcome(message):
     if is_banned(message.chat.id): return
     
     welcome_text = (
-        "🌟 <b>Welcome to Pro Mail Assistant!</b> 🌟\n"
-        "━━━━━━━━━━━━━━━━━━━━━━━━\n"
-        "সবচেয়ে <b>ফাস্ট</b> এবং <b>সিকিউর</b> টেম্পোরারি মেইল সার্ভিস।\n"
-        "যেকোনো ওয়েবসাইটের OTP এবং Verification Link এখানে সাথে সাথে রিসিভ করুন, একদম কোনো ঝামেলা ছাড়াই।\n\n"
-        "✨ <i>মডার্ন UI এবং ডায়নামিক ইনবক্স ম্যানেজমেন্টের অভিজ্ঞতা নিতে নিচের বাটনগুলো ব্যবহার করুন।</i>\n"
-        "━━━━━━━━━━━━━━━━━━━━━━━━"
+        "🌟 <b>Welcome to Pro Mail Assistant!</b>\n\n"
+        "আপনার পার্সোনাল ইনবক্সকে স্প্যাম থেকে সুরক্ষিত রাখুন। "
+        "যেকোনো ওয়েবসাইটের ভেরিফিকেশন কোড (OTP) বা লিংক রিসিভ করুন মাত্র কয়েক সেকেন্ডে!\n\n"
+        "✨ <i>মডার্ন UI এবং ডায়নামিক ইনবক্স ম্যানেজমেন্টের অভিজ্ঞতা নিতে নিচের বাটনগুলো ব্যবহার করুন।</i>"
     )
     bot.send_message(message.chat.id, welcome_text, reply_markup=get_main_menu(str(message.chat.id)))
 
@@ -193,10 +199,7 @@ def handle_text(message):
     if is_banned(chat_id): return
 
     if text == "✨ New Pro Mail":
-        anim_msg = bot.send_message(chat_id, "<i>⏳ Initializing Protocol... [■□□□]</i>")
-        time.sleep(0.3)
-        bot.edit_message_text("<i>🔐 Bypassing Security Servers... [■■■□]</i>", chat_id, anim_msg.message_id)
-        time.sleep(0.3)
+        anim_msg = bot.send_message(chat_id, "<i>⏳ Initializing Protocol...</i>")
         
         try:
             username = ''.join(random.choices(string.ascii_lowercase + string.digits, k=8))
@@ -211,21 +214,13 @@ def handle_text(message):
             user_data[chat_id]['total_generated'] += 1
             bot_stats['total_mails_generated'] += 1
             
-            dashboard_text = (
-                f"🎉 <b>New Mail Box Activated!</b>\n"
-                f"━━━━━━━━━━━━━━━━━━━━━━━━\n"
-                f"📥 <b>Your Secure Address:</b>\n"
-                f"👉 <code>{account.address}</code> 👈\n"
-                f"━━━━━━━━━━━━━━━━━━━━━━━━\n"
-                f"📡 <b>Live Sync:</b> Active 🟢\n"
-                f"🔄 <i>Auto-refreshing & listening for incoming mail...</i>"
-            )
-            bot.edit_message_text(dashboard_text, chat_id, anim_msg.message_id)
+            layout, markup = generate_mail_layout(account.address)
+            bot.edit_message_text(layout, chat_id, anim_msg.message_id, reply_markup=markup)
         except Exception as e:
             bot.edit_message_text(f"❌ Error: {str(e)}", chat_id, anim_msg.message_id)
 
     elif text == "✏️ Custom Mail":
-        msg = bot.send_message(chat_id, "✏️ <b>Custom Mail Creation</b>\n\nআপনি মেইলের শুরুতে কী নাম দিতে চান তা লিখুন (যেমন: <code>walid</code> বা <code>exampro</code>):", reply_markup=InlineKeyboardMarkup().add(InlineKeyboardButton("❌ Cancel", callback_data="cancel_custom")))
+        msg = bot.send_message(chat_id, "✏️ <b>Custom Mail Creation</b>\n\nআপনি মেইলের শুরুতে কী নাম দিতে চান তা লিখুন (যেমন: <code>walid</code>):", reply_markup=InlineKeyboardMarkup().add(InlineKeyboardButton("❌ Cancel", callback_data="cancel_custom")))
         bot.register_next_step_handler(msg, process_custom_mail)
 
     elif text == "🏠 Dashboard":
@@ -234,11 +229,11 @@ def handle_text(message):
             bot.send_message(chat_id, "⚠️ আপনার কোনো অ্যাক্টিভ মেইল নেই।")
             return
             
-        dash_text = "🗂️ <b>Your Mail Control Panel</b>\n\n"
+        dash_text = "🗂️ <b>Your Mail Dashboard</b>\n\n"
         markup = InlineKeyboardMarkup(row_width=1)
         for i, acc in enumerate(accounts):
             status = "🟢 Active" if i == user_data[chat_id]['active_index'] else "⚪ Standby"
-            dash_text += f"{i+1}. <code>{acc['email']}</code> [{status}]\n"
+            dash_text += f"{i+1}. <code>{acc['email']}</code> [{status}]\n\n"
             markup.add(InlineKeyboardButton(f"🔄 Switch to Mail {i+1}", callback_data=f"switch_{i}"))
             
         bot.send_message(chat_id, dash_text, reply_markup=markup)
@@ -253,40 +248,33 @@ def handle_text(message):
                 except: pass
             
             user_data[chat_id]['active_index'] = 0 if user_data[chat_id]['accounts'] else -1
-            bot.send_message(chat_id, f"🗑️ <b>Deleted!</b>\nমেইল <code>{del_mail['email']}</code> এবং এর <b>{deleted_count}</b> টি মেসেজ চ্যাট থেকে সম্পূর্ণ মুছে ফেলা হয়েছে।")
+            bot.send_message(chat_id, f"✅ <b>Deleted !</b>\n\nমেইল <code>{del_mail['email']}</code> চ্যাট থেকে মুছে ফেলা হয়েছে।")
         else:
             bot.send_message(chat_id, "⚠️ ডিলেট করার মতো কোনো অ্যাক্টিভ মেইল নেই।")
 
     elif text == "👤 Profile":
         user_info = user_data[chat_id]
         profile_text = (
-            f"👤 <b>User Profile & Statistics</b>\n"
-            f"━━━━━━━━━━━━━━━━━━━━━━━━\n"
-            f"📛 <b>Name:</b> {user_info['name']}\n"
-            f"🔗 <b>Username:</b> {user_info['username']}\n"
-            f"🆔 <b>User ID:</b> <code>{chat_id}</code>\n"
-            f"📅 <b>Joined:</b> {user_info['joined']}\n"
-            f"━━━━━━━━━━━━━━━━━━━━━━━━\n"
-            f"📊 <b>Total Generated:</b> {user_info['total_generated']} Mails\n"
-            f"🟢 <b>Current Active:</b> {len(user_info['accounts'])} Mails"
+            f"👤 <b>User Profile</b>\n\n"
+            f"📛 <b>Name :</b> {user_info['name']}\n\n"
+            f"🆔 <b>User ID :</b> <code>{chat_id}</code>\n\n"
+            f"📊 <b>Total Generated :</b> {user_info['total_generated']} Mails\n\n"
+            f"🟢 <b>Current Active :</b> {len(user_info['accounts'])} Mails"
         )
         bot.send_message(chat_id, profile_text)
 
     elif text == "⚡ About Bot":
         about_text = (
-            "🚀 <b>Premium Temp Mail Bot v6.0</b>\n"
-            "━━━━━━━━━━━━━━━━━━━━━━━━\n"
+            "🚀 <b>Premium Temp Mail Bot</b>\n\n"
             "• Engine: Mail.td Pro API\n"
             "• Performance: Zero-Lag Sync\n"
-            "• Features: Custom Mail, Smart UI, Brand Detector\n"
-            "• Designed & Managed by: <a href='https://t.me/Ad_Walid'>Md Walid</a>\n"
-            "━━━━━━━━━━━━━━━━━━━━━━━━\n"
+            "• Designed by: <a href='https://t.me/Ad_Walid'>Md Walid</a>\n\n"
             "<i>Crafted with modern interface aesthetics.</i>"
         )
         bot.send_message(chat_id, about_text, disable_web_page_preview=True)
 
     elif text == "⚙️ Admin Panel" and chat_id == ADMIN_ID:
-        bot.send_message(chat_id, "⚙️ <b>Advanced Admin Control Panel</b>\nবেছে নিন আপনি কী করতে চান:", reply_markup=get_admin_menu())
+        bot.send_message(chat_id, "⚙️ <b>Admin Control Panel</b>\n\nবেছে নিন আপনি কী করতে চান:", reply_markup=get_admin_menu())
 
 # --- Custom Mail Processing ---
 def process_custom_mail(message):
@@ -300,7 +288,7 @@ def process_custom_mail(message):
         bot.send_message(chat_id, "⚠️ নাম কমপক্ষে ৩ অক্ষরের হতে হবে। আবার চেষ্টা করুন।")
         return
         
-    anim_msg = bot.send_message(chat_id, "<i>⏳ Checking domain availability... [■■□□]</i>")
+    anim_msg = bot.send_message(chat_id, "<i>⏳ Checking availability...</i>")
     
     try:
         domains = mail_client.accounts.list_domains()
@@ -314,21 +302,13 @@ def process_custom_mail(message):
         user_data[chat_id]['total_generated'] += 1
         bot_stats['total_mails_generated'] += 1
         
-        dashboard_text = (
-            f"🎉 <b>Custom Mail Activated!</b>\n"
-            f"━━━━━━━━━━━━━━━━━━━━━━━━\n"
-            f"📥 <b>Your Secure Address:</b>\n"
-            f"👉 <code>{account.address}</code> 👈\n"
-            f"━━━━━━━━━━━━━━━━━━━━━━━━\n"
-            f"📡 <b>Live Sync:</b> Active 🟢\n"
-            f"🔄 <i>Auto-refreshing & listening for incoming mail...</i>"
-        )
-        bot.edit_message_text(dashboard_text, chat_id, anim_msg.message_id)
+        layout, markup = generate_mail_layout(account.address)
+        bot.edit_message_text(layout, chat_id, anim_msg.message_id, reply_markup=markup)
         
     except Exception as e:
         error_msg = str(e)
         if "already exists" in error_msg.lower() or "taken" in error_msg.lower() or "400" in error_msg.lower():
-            bot.edit_message_text(f"❌ <b>দুঃখিত!</b> <code>{clean_name}</code> নামটি আগে থেকেই কেউ নিয়ে নিয়েছে বা অবৈধ। অন্য নাম দিয়ে চেষ্টা করুন।", chat_id, anim_msg.message_id)
+            bot.edit_message_text(f"❌ <b>দুঃখিত!</b> <code>{clean_name}</code> নামটি আগে থেকেই কেউ নিয়ে নিয়েছে। অন্য নাম দিন।", chat_id, anim_msg.message_id)
         else:
             bot.edit_message_text(f"❌ Error: {error_msg}", chat_id, anim_msg.message_id)
 
@@ -342,47 +322,58 @@ def handle_callback(call):
         bot.clear_step_handler_by_chat_id(call.message.chat.id)
         bot.edit_message_text("❌ Custom Mail creation cancelled.", chat_id, call.message.message_id)
 
+    elif call.data == "force_fetch":
+        bot.answer_callback_query(call.id, "🔄 Fetching new emails from server...")
+
+    elif call.data == "quick_switch":
+        accounts = user_data.get(chat_id, {}).get('accounts', [])
+        if len(accounts) > 1:
+            bot.answer_callback_query(call.id, "Please use Dashboard to switch mails.")
+        else:
+            bot.answer_callback_query(call.id, "You only have one active mail.")
+
     elif call.data.startswith('switch_'):
         idx = int(call.data.split('_')[1])
         if idx < len(user_data.get(chat_id, {}).get('accounts', [])):
             user_data[chat_id]['active_index'] = idx
             active_email = user_data[chat_id]['accounts'][idx]['email']
             bot.answer_callback_query(call.id, "Switched successfully!")
-            bot.edit_message_text(f"✅ <b>Successfully Switched!</b>\n\n🟢 <b>Active Mail:</b> <code>{active_email}</code>\n📡 <i>Live synchronization is running...</i>", chat_id, call.message.message_id)
+            
+            layout, markup = generate_mail_layout(active_email)
+            bot.edit_message_text(layout, chat_id, call.message.message_id, reply_markup=markup)
             
     elif chat_id == ADMIN_ID:
         if call.data == "admin_back":
-            bot.edit_message_text("⚙️ <b>Advanced Admin Control Panel</b>\nবেছে নিন আপনি কী করতে চান:", chat_id, call.message.message_id, reply_markup=get_admin_menu())
+            bot.edit_message_text("⚙️ <b>Admin Control Panel</b>\n\nবেছে নিন আপনি কী করতে চান:", chat_id, call.message.message_id, reply_markup=get_admin_menu())
             
         elif call.data == "admin_stats":
             total_users = len(user_data)
             active_accounts = sum(len(d['accounts']) for d in user_data.values())
             stats = (
-                f"📊 <b>Bot Live Statistics</b>\n"
-                f"━━━━━━━━━━━━━━━\n"
-                f"👥 Total Users: <b>{total_users}</b>\n"
-                f"🚫 Banned Users: <b>{len(banned_users)}</b>\n"
-                f"📧 Total Mails Gen: <b>{bot_stats['total_mails_generated']}</b>\n"
+                f"📊 <b>Bot Live Statistics</b>\n\n"
+                f"👥 Total Users: <b>{total_users}</b>\n\n"
+                f"🚫 Banned Users: <b>{len(banned_users)}</b>\n\n"
+                f"📧 Total Mails Gen: <b>{bot_stats['total_mails_generated']}</b>\n\n"
                 f"🟢 Current Active Mails: <b>{active_accounts}</b>"
             )
             bot.edit_message_text(stats, chat_id, call.message.message_id, reply_markup=get_back_button())
             
         elif call.data == "admin_users":
-            user_list = "👥 <b>Recent Users List:</b>\n"
+            user_list = "👥 <b>Recent Users List:</b>\n\n"
             for uid, data in list(user_data.items())[-20:]:
                 user_list += f"• {data['name']} (<code>{uid}</code>)\n"
             bot.edit_message_text(user_list, chat_id, call.message.message_id, reply_markup=get_back_button())
             
         elif call.data == "admin_ban":
-            bot.edit_message_text("✍️ <b>Ban User:</b>\nযাকে ব্যান করতে চান তার User ID টাইপ করে সেন্ড করুন:", chat_id, call.message.message_id, reply_markup=get_back_button())
+            bot.edit_message_text("✍️ <b>Ban User:</b>\n\nযাকে ব্যান করতে চান তার User ID টাইপ করে সেন্ড করুন:", chat_id, call.message.message_id, reply_markup=get_back_button())
             bot.register_next_step_handler(call.message, process_ban)
             
         elif call.data == "admin_unban":
-            bot.edit_message_text("✍️ <b>Unban User:</b>\nযাকে আনব্যান করতে চান তার User ID সেন্ড করুন:", chat_id, call.message.message_id, reply_markup=get_back_button())
+            bot.edit_message_text("✍️ <b>Unban User:</b>\n\nযাকে আনব্যান করতে চান তার User ID সেন্ড করুন:", chat_id, call.message.message_id, reply_markup=get_back_button())
             bot.register_next_step_handler(call.message, process_unban)
             
         elif call.data == "admin_send_promo":
-            bot.edit_message_text("📢 <b>Broadcast Message:</b>\nনোটিশ বা প্রোমোশনাল পোস্টের টেক্সট লিখে সেন্ড করুন (HTML সাপোর্টেড):", chat_id, call.message.message_id, reply_markup=get_back_button())
+            bot.edit_message_text("📢 <b>Broadcast Message:</b>\n\nনোটিশ বা প্রোমোশনাল পোস্টের টেক্সট লিখে সেন্ড করুন (HTML):", chat_id, call.message.message_id, reply_markup=get_back_button())
             bot.register_next_step_handler(call.message, process_promo_text)
             
         elif call.data == "admin_del_promo":
@@ -391,7 +382,7 @@ def handle_callback(call):
                 try: bot.delete_message(uid, msg_id); deleted += 1
                 except: pass
             system_data['active_promos'].clear()
-            bot.edit_message_text(f"🗑️ <b>Promo Deleted!</b>\n{deleted} জন ইউজারের ইনবক্স থেকে সর্বশেষ মেসেজ মুছে ফেলা হয়েছে।", chat_id, call.message.message_id, reply_markup=get_back_button())
+            bot.edit_message_text(f"✅ <b>Promo Deleted!</b>\n\n{deleted} জন ইউজারের ইনবক্স থেকে সর্বশেষ মেসেজ মুছে ফেলা হয়েছে।", chat_id, call.message.message_id, reply_markup=get_back_button())
 
 # --- Admin Processing Functions ---
 def process_ban(message):
@@ -422,7 +413,7 @@ def broadcast_promo(message, promo_text):
         system_data['active_promos'].clear()
         for uid in list(user_data.keys()):
             try:
-                sent = bot.send_message(uid, f"📢 <b>Official Update</b>\n━━━━━━━━━━━━━━━━━━━━━━━━\n{promo_text}", reply_markup=markup if markup.keyboard else None)
+                sent = bot.send_message(uid, f"📢 <b>Official Update</b>\n\n{promo_text}", reply_markup=markup if markup.keyboard else None)
                 system_data['active_promos'][uid] = sent.message_id
             except: pass
             time.sleep(0.05)
@@ -433,7 +424,7 @@ def broadcast_promo(message, promo_text):
 if __name__ == "__main__":
     threading.Thread(target=run_web_server, daemon=True).start()
     threading.Thread(target=auto_check_mail, daemon=True).start()
-    print("Ultra Premium Bot is Live...")
+    print("Clean UI Bot is Live...")
     while True:
         try: bot.polling(none_stop=True, interval=0, timeout=20)
         except Exception: time.sleep(5)
