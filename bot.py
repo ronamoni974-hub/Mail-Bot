@@ -15,10 +15,30 @@ from datetime import datetime
 TOKEN = '8572418006:AAEQBCXBPxa35yBiSWeaVWVvLP9N326fJos'
 bot = telebot.TeleBot(TOKEN, parse_mode='HTML')
 
-MAILTD_TOKEN = 'td_18c938ad445ea882ebc1110b22723e1ca1ddef7911dde89e80a095f3c2120119'
-mail_client = MailTD(MAILTD_TOKEN)
-
 ADMIN_ID = "6670461311"
+
+# --- Dynamic API Management Storage ---
+# এখানে আপনার ডিফল্ট API দেওয়া আছে। Admin প্যানেল থেকে আরও অ্যাড করতে পারবেন।
+api_data = {
+    'tokens': ['td_18c938ad445ea882ebc1110b22723e1ca1ddef7911dde89e80a095f3c2120119'],
+    'active_idx': 0
+}
+api_clients = {}
+
+def get_active_client():
+    token = api_data['tokens'][api_data['active_idx']]
+    if token not in api_clients:
+        api_clients[token] = MailTD(token)
+    return api_clients[token], token
+
+def switch_api_token():
+    if len(api_data['tokens']) > 1:
+        api_data['active_idx'] = (api_data['active_idx'] + 1) % len(api_data['tokens'])
+        try:
+            bot.send_message(ADMIN_ID, f"⚠️ <b>API Limit Auto-Switch!</b>\n\nপূর্বের API লিমিট শেষ হয়ে যাওয়ায় স্বয়ংক্রিয়ভাবে পরবর্তী API তে সুইচ করা হয়েছে।\n🟢 <b>New Active Index:</b> {api_data['active_idx']}")
+        except: pass
+        return True
+    return False
 
 # --- Global Storage ---
 user_data = {}
@@ -32,18 +52,13 @@ app = Flask('')
 def home(): return "Pro Mail Bot is Running 24/7!"
 def run_web_server(): app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 8080)))
 
-# --- Menu Builders (Updated Professional Layout) ---
+# --- Menu Builders ---
 def get_main_menu(chat_id):
     markup = ReplyKeyboardMarkup(resize_keyboard=True)
-    # Row 1: Main Action (Full Width)
     markup.row(KeyboardButton("✨ New Pro Mail"))
-    # Row 2: Mail Management
     markup.row(KeyboardButton("✏️ Custom Mail"), KeyboardButton("🏠 Dashboard"))
-    # Row 3: Account & Deletion
     markup.row(KeyboardButton("🗑️ Delete Active"), KeyboardButton("👤 Profile"))
-    # Row 4: Info
     markup.row(KeyboardButton("⚡ About Bot"))
-    # Row 5: Admin Panel (Only for Admin)
     if str(chat_id) == ADMIN_ID:
         markup.row(KeyboardButton("⚙️ Admin Panel"))
     return markup
@@ -52,10 +67,11 @@ def get_admin_menu():
     markup = InlineKeyboardMarkup(row_width=2)
     markup.add(InlineKeyboardButton("👥 User List", callback_data="admin_users"),
                InlineKeyboardButton("📊 Statistics", callback_data="admin_stats"))
+    markup.add(InlineKeyboardButton("🔑 Manage APIs", callback_data="admin_apis"), # New Option
+               InlineKeyboardButton("📢 Send Notice", callback_data="admin_send_promo"))
     markup.add(InlineKeyboardButton("🚫 Ban User", callback_data="admin_ban"),
                InlineKeyboardButton("✅ Unban User", callback_data="admin_unban"))
-    markup.add(InlineKeyboardButton("📢 Send Notice/Promo", callback_data="admin_send_promo"),
-               InlineKeyboardButton("🗑️ Del Promo", callback_data="admin_del_promo"))
+    markup.add(InlineKeyboardButton("🗑️ Del Promo", callback_data="admin_del_promo"))
     return markup
 
 def get_back_button():
@@ -87,7 +103,7 @@ def get_service_logo(sender):
     if 'steam' in sender_lower: return '🎮 Steam'
     return '🌐 Web Service'
 
-# --- Smart Extractor (Updated Inline Code) ---
+# --- Smart Extractor ---
 def extract_and_format(subject, body):
     subject_text = subject if subject else "No Subject"
     body_text = body if body else ""
@@ -102,7 +118,6 @@ def extract_and_format(subject, body):
     otp_match = re.search(r'\b(\d{4,8})\b', full_text)
     otp_section = ""
     if otp_match:
-        # এখানে কোডটি এক লাইনে সেট করা হয়েছে
         otp_section = f"🔑 <b>Verification Code :</b> <code>{otp_match.group(1)}</code>\n\n"
     
     link_match = re.search(r'(https?://[^\s]+)', full_text)
@@ -124,6 +139,34 @@ def generate_mail_layout(email_address):
                InlineKeyboardButton("🔄 Force Fetch", callback_data="force_fetch"))
     return layout, markup
 
+# --- Smart Mail Creator with Auto Fallback ---
+def create_mail_with_fallback(clean_name=None):
+    for _ in range(len(api_data['tokens'])):
+        client, token = get_active_client()
+        try:
+            domains = client.accounts.list_domains()
+            domain_name = domains[0].domain if hasattr(domains[0], 'domain') else domains[0]
+            
+            if clean_name:
+                email_address = f"{clean_name}@{domain_name}"
+            else:
+                username = ''.join(random.choices(string.ascii_lowercase + string.digits, k=8))
+                email_address = f"{username}@{domain_name}"
+                
+            account = client.accounts.create(email_address, password="propassword123")
+            return account, token # সফল হলে একাউন্ট এবং টোকেন রিটার্ন করবে
+            
+        except Exception as e:
+            error_msg = str(e).lower()
+            # যদি কাস্টম নাম আগে থেকেই কেউ নিয়ে থাকে, তবে API চেঞ্জ করার দরকার নেই
+            if clean_name and ("already exists" in error_msg or "taken" in error_msg or "400" in error_msg):
+                raise Exception("NameTaken")
+            else:
+                # লিমিট শেষ বা API নষ্ট হলে পরের API তে সুইচ করবে
+                if not switch_api_token():
+                    raise Exception("All APIs Exhausted")
+    raise Exception("API Error")
+
 # --- Non-Blocking Auto Checker Engine ---
 def auto_check_mail():
     while True:
@@ -136,13 +179,19 @@ def auto_check_mail():
                     account = data['accounts'][active_index]
                     account_id = account['account_id']
                     
-                    messages, _ = mail_client.messages.list(account_id)
+                    # যেই API দিয়ে মেইল খোলা হয়েছিল, সেই API ক্লায়েন্টটি বের করা
+                    acc_token = account.get('api_token', api_data['tokens'][0])
+                    if acc_token not in api_clients:
+                        api_clients[acc_token] = MailTD(acc_token)
+                    temp_client = api_clients[acc_token]
+                    
+                    messages, _ = temp_client.messages.list(account_id)
                     for msg_preview in messages:
                         msg_id = msg_preview.id
                         if msg_id not in account['seen_msgs']:
                             account['seen_msgs'].add(msg_id)
                             
-                            full_msg = mail_client.messages.get(account_id, msg_id)
+                            full_msg = temp_client.messages.get(account_id, msg_id)
                             otp_section, smart_body, verify_link = extract_and_format(full_msg.subject, full_msg.text_body)
                             
                             sender_info = getattr(full_msg, 'from_address', getattr(full_msg, 'sender', 'Unknown Sender'))
@@ -204,16 +253,14 @@ def handle_text(message):
 
     if text == "✨ New Pro Mail":
         anim_msg = bot.send_message(chat_id, "<i>⏳ Initializing Protocol...</i>")
-        
         try:
-            username = ''.join(random.choices(string.ascii_lowercase + string.digits, k=8))
-            domains = mail_client.accounts.list_domains()
-            domain_name = domains[0].domain if hasattr(domains[0], 'domain') else domains[0]
-            email_address = f"{username}@{domain_name}"
+            account, used_token = create_mail_with_fallback() # Auto Fallback Feature
             
-            account = mail_client.accounts.create(email_address, password="propassword123")
-            
-            user_data[chat_id]['accounts'].append({'account_id': account.id, 'email': account.address, 'seen_msgs': set(), 'msg_ids': [anim_msg.message_id]})
+            user_data[chat_id]['accounts'].append({
+                'account_id': account.id, 'email': account.address, 
+                'seen_msgs': set(), 'msg_ids': [anim_msg.message_id],
+                'api_token': used_token # মেইলের সাথে টোকেন সেভ রাখা হলো
+            })
             user_data[chat_id]['active_index'] = len(user_data[chat_id]['accounts']) - 1
             user_data[chat_id]['total_generated'] += 1
             bot_stats['total_mails_generated'] += 1
@@ -221,7 +268,7 @@ def handle_text(message):
             layout, markup = generate_mail_layout(account.address)
             bot.edit_message_text(layout, chat_id, anim_msg.message_id, reply_markup=markup)
         except Exception as e:
-            bot.edit_message_text(f"❌ Error: {str(e)}", chat_id, anim_msg.message_id)
+            bot.edit_message_text(f"❌ Server overload or API limits reached. Try again later.", chat_id, anim_msg.message_id)
 
     elif text == "✏️ Custom Mail":
         msg = bot.send_message(chat_id, "✏️ <b>Custom Mail Creation</b>\n\nআপনি মেইলের শুরুতে কী নাম দিতে চান তা লিখুন (যেমন: <code>walid</code>):", reply_markup=InlineKeyboardMarkup().add(InlineKeyboardButton("❌ Cancel", callback_data="cancel_custom")))
@@ -252,7 +299,7 @@ def handle_text(message):
                 except: pass
             
             user_data[chat_id]['active_index'] = 0 if user_data[chat_id]['accounts'] else -1
-            bot.send_message(chat_id, f"✅ <b>Deleted !</b>\n\nমেইল <code>{del_mail['email']}</code> চ্যাট থেকে মুছে ফেলা হয়েছে।", reply_markup=get_main_menu(chat_id)) # কীবোর্ড আপডেট নিশ্চিত করতে
+            bot.send_message(chat_id, f"✅ <b>Deleted !</b>\n\nমেইল <code>{del_mail['email']}</code> চ্যাট থেকে মুছে ফেলা হয়েছে।", reply_markup=get_main_menu(chat_id))
         else:
             bot.send_message(chat_id, "⚠️ ডিলেট করার মতো কোনো অ্যাক্টিভ মেইল নেই।")
 
@@ -293,15 +340,14 @@ def process_custom_mail(message):
         return
         
     anim_msg = bot.send_message(chat_id, "<i>⏳ Checking availability...</i>")
-    
     try:
-        domains = mail_client.accounts.list_domains()
-        domain_name = domains[0].domain if hasattr(domains[0], 'domain') else domains[0]
-        email_address = f"{clean_name}@{domain_name}"
+        account, used_token = create_mail_with_fallback(clean_name)
         
-        account = mail_client.accounts.create(email_address, password="propassword123")
-        
-        user_data[chat_id]['accounts'].append({'account_id': account.id, 'email': account.address, 'seen_msgs': set(), 'msg_ids': [anim_msg.message_id]})
+        user_data[chat_id]['accounts'].append({
+            'account_id': account.id, 'email': account.address, 
+            'seen_msgs': set(), 'msg_ids': [anim_msg.message_id],
+            'api_token': used_token
+        })
         user_data[chat_id]['active_index'] = len(user_data[chat_id]['accounts']) - 1
         user_data[chat_id]['total_generated'] += 1
         bot_stats['total_mails_generated'] += 1
@@ -310,11 +356,10 @@ def process_custom_mail(message):
         bot.edit_message_text(layout, chat_id, anim_msg.message_id, reply_markup=markup)
         
     except Exception as e:
-        error_msg = str(e)
-        if "already exists" in error_msg.lower() or "taken" in error_msg.lower() or "400" in error_msg.lower():
+        if str(e) == "NameTaken":
             bot.edit_message_text(f"❌ <b>দুঃখিত!</b> <code>{clean_name}</code> নামটি আগে থেকেই কেউ নিয়ে নিয়েছে। অন্য নাম দিন।", chat_id, anim_msg.message_id)
         else:
-            bot.edit_message_text(f"❌ Error: {error_msg}", chat_id, anim_msg.message_id)
+            bot.edit_message_text(f"❌ Error: Servers busy or API limits reached.", chat_id, anim_msg.message_id)
 
 # --- Callbacks & Dynamic Admin Menu ---
 @bot.callback_query_handler(func=lambda call: True)
@@ -342,7 +387,6 @@ def handle_callback(call):
             user_data[chat_id]['active_index'] = idx
             active_email = user_data[chat_id]['accounts'][idx]['email']
             bot.answer_callback_query(call.id, "Switched successfully!")
-            
             layout, markup = generate_mail_layout(active_email)
             bot.edit_message_text(layout, chat_id, call.message.message_id, reply_markup=markup)
             
@@ -350,16 +394,24 @@ def handle_callback(call):
         if call.data == "admin_back":
             bot.edit_message_text("⚙️ <b>Admin Control Panel</b>\n\nবেছে নিন আপনি কী করতে চান:", chat_id, call.message.message_id, reply_markup=get_admin_menu())
             
+        elif call.data == "admin_apis":
+            markup = InlineKeyboardMarkup()
+            markup.add(InlineKeyboardButton("➕ Add New API Token", callback_data="admin_add_api"))
+            markup.add(InlineKeyboardButton("🔙 Back to Panel", callback_data="admin_back"))
+            api_info = f"🔑 <b>API Management</b>\n\n" \
+                       f"📊 Total APIs Stored : <b>{len(api_data['tokens'])}</b>\n\n" \
+                       f"🟢 Current Active Index : <b>{api_data['active_idx']}</b>\n\n" \
+                       f"<i>নোট: একটি API এর লিমিট শেষ হলে বট নিজে থেকেই পরেরটিতে সুইচ করবে।</i>"
+            bot.edit_message_text(api_info, chat_id, call.message.message_id, reply_markup=markup)
+            
+        elif call.data == "admin_add_api":
+            bot.edit_message_text("➕ <b>Add New API Token</b>\n\nআপনার নতুন Mail.td API Token টি টাইপ করে সেন্ড করুন:", chat_id, call.message.message_id, reply_markup=get_back_button())
+            bot.register_next_step_handler(call.message, process_add_api)
+            
         elif call.data == "admin_stats":
             total_users = len(user_data)
             active_accounts = sum(len(d['accounts']) for d in user_data.values())
-            stats = (
-                f"📊 <b>Bot Live Statistics</b>\n\n"
-                f"👥 Total Users: <b>{total_users}</b>\n\n"
-                f"🚫 Banned Users: <b>{len(banned_users)}</b>\n\n"
-                f"📧 Total Mails Gen: <b>{bot_stats['total_mails_generated']}</b>\n\n"
-                f"🟢 Current Active Mails: <b>{active_accounts}</b>"
-            )
+            stats = f"📊 <b>Bot Live Statistics</b>\n\n👥 Total Users: <b>{total_users}</b>\n\n🚫 Banned Users: <b>{len(banned_users)}</b>\n\n📧 Total Mails Gen: <b>{bot_stats['total_mails_generated']}</b>\n\n🟢 Current Active Mails: <b>{active_accounts}</b>"
             bot.edit_message_text(stats, chat_id, call.message.message_id, reply_markup=get_back_button())
             
         elif call.data == "admin_users":
@@ -389,6 +441,17 @@ def handle_callback(call):
             bot.edit_message_text(f"✅ <b>Promo Deleted!</b>\n\n{deleted} জন ইউজারের ইনবক্স থেকে সর্বশেষ মেসেজ মুছে ফেলা হয়েছে।", chat_id, call.message.message_id, reply_markup=get_back_button())
 
 # --- Admin Processing Functions ---
+def process_add_api(message):
+    new_token = message.text.strip()
+    if len(new_token) > 20: # Basic validation
+        if new_token not in api_data['tokens']:
+            api_data['tokens'].append(new_token)
+            bot.send_message(message.chat.id, f"✅ <b>API Added Successfully!</b>\n\nমোট API সংখ্যা এখন: {len(api_data['tokens'])}")
+        else:
+            bot.send_message(message.chat.id, "⚠️ এই API Token টি আগেই লিস্টে আছে।")
+    else:
+        bot.send_message(message.chat.id, "❌ ইনভ্যালিড টোকেন!")
+
 def process_ban(message):
     if not message.text.isdigit(): return
     banned_users.add(message.text.strip())
@@ -428,8 +491,7 @@ def broadcast_promo(message, promo_text):
 if __name__ == "__main__":
     threading.Thread(target=run_web_server, daemon=True).start()
     threading.Thread(target=auto_check_mail, daemon=True).start()
-    print("Professional Bot is Live...")
+    print("Anti-Limit Pro Bot is Live...")
     while True:
         try: bot.polling(none_stop=True, interval=0, timeout=20)
         except Exception: time.sleep(5)
-
