@@ -32,14 +32,20 @@ app = Flask('')
 def home(): return "Pro Mail Bot is Running 24/7!"
 def run_web_server(): app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 8080)))
 
-# --- Menu Builders ---
+# --- Menu Builders (Updated Professional Layout) ---
 def get_main_menu(chat_id):
-    markup = ReplyKeyboardMarkup(resize_keyboard=True, row_width=2)
-    markup.add(KeyboardButton("✨ New Pro Mail"), KeyboardButton("✏️ Custom Mail"))
-    markup.add(KeyboardButton("🏠 Dashboard"), KeyboardButton("🗑️ Delete Active"))
-    markup.add(KeyboardButton("👤 Profile"), KeyboardButton("⚡ About Bot"))
+    markup = ReplyKeyboardMarkup(resize_keyboard=True)
+    # Row 1: Main Action (Full Width)
+    markup.row(KeyboardButton("✨ New Pro Mail"))
+    # Row 2: Mail Management
+    markup.row(KeyboardButton("✏️ Custom Mail"), KeyboardButton("🏠 Dashboard"))
+    # Row 3: Account & Deletion
+    markup.row(KeyboardButton("🗑️ Delete Active"), KeyboardButton("👤 Profile"))
+    # Row 4: Info
+    markup.row(KeyboardButton("⚡ About Bot"))
+    # Row 5: Admin Panel (Only for Admin)
     if str(chat_id) == ADMIN_ID:
-        markup.add(KeyboardButton("⚙️ Admin Panel"))
+        markup.row(KeyboardButton("⚙️ Admin Panel"))
     return markup
 
 def get_admin_menu():
@@ -81,7 +87,7 @@ def get_service_logo(sender):
     if 'steam' in sender_lower: return '🎮 Steam'
     return '🌐 Web Service'
 
-# --- Smart Extractor ---
+# --- Smart Extractor (Updated Inline Code) ---
 def extract_and_format(subject, body):
     subject_text = subject if subject else "No Subject"
     body_text = body if body else ""
@@ -96,10 +102,8 @@ def extract_and_format(subject, body):
     otp_match = re.search(r'\b(\d{4,8})\b', full_text)
     otp_section = ""
     if otp_match:
-        otp_section = (
-            f"🔑 <b>Verification Code :</b>\n"
-            f"<code>{otp_match.group(1)}</code>\n\n"
-        )
+        # এখানে কোডটি এক লাইনে সেট করা হয়েছে
+        otp_section = f"🔑 <b>Verification Code :</b> <code>{otp_match.group(1)}</code>\n\n"
     
     link_match = re.search(r'(https?://[^\s]+)', full_text)
     extracted_link = link_match.group(1) if link_match else None
@@ -248,7 +252,7 @@ def handle_text(message):
                 except: pass
             
             user_data[chat_id]['active_index'] = 0 if user_data[chat_id]['accounts'] else -1
-            bot.send_message(chat_id, f"✅ <b>Deleted !</b>\n\nমেইল <code>{del_mail['email']}</code> চ্যাট থেকে মুছে ফেলা হয়েছে।")
+            bot.send_message(chat_id, f"✅ <b>Deleted !</b>\n\nমেইল <code>{del_mail['email']}</code> চ্যাট থেকে মুছে ফেলা হয়েছে।", reply_markup=get_main_menu(chat_id)) # কীবোর্ড আপডেট নিশ্চিত করতে
         else:
             bot.send_message(chat_id, "⚠️ ডিলেট করার মতো কোনো অ্যাক্টিভ মেইল নেই।")
 
@@ -424,7 +428,8 @@ def broadcast_promo(message, promo_text):
 if __name__ == "__main__":
     threading.Thread(target=run_web_server, daemon=True).start()
     threading.Thread(target=auto_check_mail, daemon=True).start()
-    print("Clean UI Bot is Live...")
+    print("Professional Bot is Live...")
     while True:
         try: bot.polling(none_stop=True, interval=0, timeout=20)
         except Exception: time.sleep(5)
+
