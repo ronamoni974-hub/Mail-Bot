@@ -147,13 +147,19 @@ def get_service_logo(sender):
     if 'steam' in sender_lower: return '🎮 Steam'
     return '🌐 Web Service'
 
-# --- Advanced Smart Extractor (Fix for Instagram HTML Mails) ---
+# --- Advanced Smart Extractor (CSS/JS Filter Added) ---
 def extract_and_format(subject, text_body, html_body=""):
     subject_text = subject if subject else "No Subject"
-    
-    # HTML ট্যাগগুলো স্পেস দিয়ে রিপ্লেস করা যেন কোডগুলো আলাদা থাকে
-    clean_html = re.sub(r'<[^>]+>', ' ', str(html_body)) if html_body else ""
     clean_text = str(text_body) if text_body else ""
+    
+    clean_html = ""
+    if html_body:
+        # 1. সব <style> এবং <script> ব্লক (হাবিজাবি কোড) পুরোপুরি রিমুভ করা
+        no_scripts = re.sub(r'<(script|style).*?>.*?</\1>', ' ', str(html_body), flags=re.IGNORECASE | re.DOTALL)
+        # 2. এরপর বাকি নরমাল HTML ট্যাগগুলো রিমুভ করা
+        no_tags = re.sub(r'<[^>]+>', ' ', no_scripts)
+        # 3. অতিরিক্ত স্পেসগুলো মুছে ফেলা
+        clean_html = re.sub(r'\s+', ' ', no_tags).strip()
     
     # কোড খোঁজার জন্য সব টেক্সট একসাথে করা হলো
     search_text = f"{subject_text} {clean_text} {clean_html}"
@@ -168,11 +174,10 @@ def extract_and_format(subject, text_body, html_body=""):
     link_match = re.search(r'(https?://[^\s\"\'<>]+)', search_text)
     extracted_link = link_match.group(1) if link_match else None
     
-    # মেসেজ বক্সে দেখানোর জন্য বেস্ট টেক্সট সিলেক্ট করা (Instagram Fix)
+    # মেসেজ বক্সে দেখানোর জন্য বেস্ট টেক্সট সিলেক্ট করা
     display_body = clean_text.strip()
-    if len(display_body) < 15 and clean_html.strip():
-        # যদি নরমাল বডি ফাঁকা থাকে, তবে HTML বডি থেকে অতিরিক্ত স্পেস মুছে শো করবে
-        display_body = re.sub(r'\s+', ' ', clean_html).strip()
+    if len(display_body) < 15 and clean_html:
+        display_body = clean_html
         
     if not display_body:
         display_body = "No Content"
@@ -221,7 +226,6 @@ def auto_check_mail():
                             
                             full_msg = temp_client.messages.get(account_id, msg_id)
                             
-                            # HTML বডি ফেচ করা হচ্ছে (Fix applied here)
                             html_body = getattr(full_msg, 'html_body', '')
                             text_body = full_msg.text_body if full_msg.text_body else ''
                             
@@ -556,7 +560,7 @@ def broadcast_promo(message, promo_text):
 if __name__ == "__main__":
     threading.Thread(target=run_web_server, daemon=True).start()
     threading.Thread(target=auto_check_mail, daemon=True).start()
-    print("Fixed Extractor Bot is Live...")
+    print("Advanced CSS Cleaner Bot is Live...")
     while True:
         try: bot.polling(none_stop=True, interval=0, timeout=20)
         except Exception: time.sleep(5)
