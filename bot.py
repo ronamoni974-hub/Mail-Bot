@@ -216,18 +216,18 @@ def extract_and_format(subject, text_body, html_body=""):
         clean_html = re.sub(r'<(script|style).*?>.*?</\1>', ' ', str(html_body), flags=re.IGNORECASE | re.DOTALL)
         clean_html = re.sub(r'<br\s*/?>|</p>|</div>', '\n', clean_html, flags=re.IGNORECASE)
         clean_html = re.sub(r'<[^>]+>', ' ', clean_html)
+        clean_html = html.unescape(clean_html) # Fixes the &nbsp; issue
         clean_html = re.sub(r'[ \t]+', ' ', clean_html).strip()
         clean_html = re.sub(r'\n+', '\n', clean_html)
     
     search_text = f"{subject_text}\n{clean_text}\n{clean_html}"
     
-    # Advanced Smart Regex for OTP (Catches Numbers, Alphanumerics, and Spaced Texts like Instagram)
+    # Advanced Smart Regex for OTP
     otp_match = re.search(r'\b(\d{4,8})\b|\b([a-zA-Z0-9](?:\s+[a-zA-Z0-9]){5,7})\b|\b([A-Z0-9]{5,8})\b', search_text)
     
     extracted_otp = ""
     if otp_match:
         extracted_otp = next((g for g in otp_match.groups() if g), "").strip()
-        # Remove spaces so user can copy easily (e.g. "u j o r y P I c" -> "ujoryPIc")
         if len(extracted_otp.replace(" ", "")) >= 4:
             extracted_otp = extracted_otp.replace(" ", "")
 
@@ -248,7 +248,7 @@ def generate_mail_layout(email_address):
     markup = InlineKeyboardMarkup(row_width=2).add(InlineKeyboardButton("🔄 Switch Mail", callback_data="quick_switch"), InlineKeyboardButton("🔄 Force Fetch", callback_data="force_fetch"))
     return layout, markup
 
-# --- Auto Checker Engine (Fix: Crash Prevented) ---
+# --- Auto Checker Engine ---
 def auto_check_mail():
     while True:
         try:
@@ -304,7 +304,7 @@ def auto_check_mail():
                                     account['msg_ids'].append(sent_msg.message_id)
                     except Exception as e:
                         print(f"Error checking {email_addr}: {e}")
-                        pass # Ignore individual mail checking errors so loop continues safely
+                        pass 
                         
                     if needs_sync: save_user_data(chat_id)
         except Exception as e: 
@@ -442,7 +442,7 @@ def process_custom_mail(message):
         else:
             bot.edit_message_text(f"❌ Error Details: {str(e)}", chat_id, anim_msg.message_id)
 
-# --- Admin Processing Functions ---
+# --- Admin Processing Functions (Updated Broadcast) ---
 def process_add_api(message):
     new_token = message.text.strip()
     if len(new_token) > 20: 
@@ -466,21 +466,24 @@ def process_unban(message):
     bot.send_message(message.chat.id, f"✅ <b>{message.text}</b> কে আনব্যান করা হয়েছে!")
 
 def process_promo_text(message):
-    if not message.text: return
-    promo_text = message.text
+    # এখন শুধু টেক্সট নয়, যেকোনো মেসেজ নিবে
     msg = bot.send_message(message.chat.id, "🔗 লিংকের জন্য বাটন দিতে চাইলে লিংক দিন। না দিতে চাইলে 'no' লিখুন:")
-    bot.register_next_step_handler(msg, lambda m: broadcast_promo(m, promo_text))
+    bot.register_next_step_handler(msg, lambda m: broadcast_promo(m, message))
 
-def broadcast_promo(message, promo_text):
-    link = message.text.strip()
+def broadcast_promo(button_message, promo_message):
+    link = button_message.text.strip()
     markup = InlineKeyboardMarkup()
-    if link.lower() != 'no' and link.startswith('http'): markup.add(InlineKeyboardButton("🌟 View Details", url=link))
-    bot.send_message(message.chat.id, "🚀 ব্রডকাস্ট শুরু হয়েছে... এটি ব্যাকগ্রাউন্ডে চলবে।")
+    if link.lower() != 'no' and link.startswith('http'): 
+        markup.add(InlineKeyboardButton("🌟 View Details", url=link))
+        
+    bot.send_message(button_message.chat.id, "🚀 ব্রডকাস্ট শুরু হয়েছে... এটি ব্যাকগ্রাউন্ডে চলবে।")
+    
     def send_to_all():
         system_data['active_promos'].clear()
         for uid in list(user_data.keys()):
             try:
-                sent = bot.send_message(uid, f"📢 <b>Official Update</b>\n\n{promo_text}", reply_markup=markup if markup.keyboard else None)
+                # copy_message এর ফলে ছবি, ভিডিও, ফাইল বা টেক্সট সবকিছু হুবহু সেন্ড হবে
+                sent = bot.copy_message(chat_id=uid, from_chat_id=promo_message.chat.id, message_id=promo_message.message_id, reply_markup=markup if markup.keyboard else None)
                 system_data['active_promos'][uid] = sent.message_id
             except: pass
             time.sleep(0.05)
@@ -567,7 +570,7 @@ def handle_callback(call):
             bot.register_next_step_handler(call.message, process_unban)
             
         elif call.data == "admin_send_promo":
-            bot.edit_message_text("📢 <b>Broadcast Message:</b>\n\nনোটিশ বা প্রোমোশনাল পোস্টের টেক্সট লিখে সেন্ড করুন (HTML):", chat_id, call.message.message_id, reply_markup=get_back_button())
+            bot.edit_message_text("📢 <b>Broadcast Message:</b>\n\nনোটিশ বা প্রোমোশনাল পোস্টের টেক্সট বা ছবি লিখে সেন্ড করুন:", chat_id, call.message.message_id, reply_markup=get_back_button())
             bot.register_next_step_handler(call.message, process_promo_text)
             
         elif call.data == "admin_del_promo":
