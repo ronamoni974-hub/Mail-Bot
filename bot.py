@@ -96,12 +96,12 @@ def load_all_data_from_firebase():
     except Exception as e:
         print(f"Firebase Load Error: {e}")
 
-# --- API Management & Fallback Logic ---
+# --- Load Balancing API Management ---
 def restore_apis():
     current_time = time.time()
     changed = False
     for token, exhaust_time in list(api_data['exhausted'].items()):
-        if (current_time - exhaust_time) >= 30 * 86400: # 30 Days
+        if (current_time - exhaust_time) >= 30 * 86400: # 30 Days Reset
             del api_data['exhausted'][token]
             api_data['usage'][token] = 0
             changed = True
@@ -115,40 +115,54 @@ def mark_api_exhausted(token):
         try: bot.send_message(ADMIN_ID, f"⚠️ <b>API Limit Reached!</b>\n\nএকটি API এর লিমিট শেষ। পরবর্তী API তে সুইচ করা হচ্ছে।")
         except: pass
 
-def get_active_client():
+def get_active_client(exclude_tokens=None):
     restore_apis()
-    valid_tokens = [t for t in api_data['tokens'] if "YOUR_" not in t and len(t) > 15]
+    if exclude_tokens is None: exclude_tokens = set()
+    
+    valid_tokens = [t for t in api_data['tokens'] if "YOUR_" not in t and len(t) > 15 and t not in exclude_tokens]
     if not valid_tokens: raise Exception("All APIs Exhausted")
 
-    for _ in range(len(valid_tokens)):
-        token = valid_tokens[api_data['active_idx'] % len(valid_tokens)]
-        if token not in api_data['exhausted']:
-            if token not in api_clients:
-                api_clients[token] = MailTD(token)
-            return api_clients[token], token
-        api_data['active_idx'] = (api_data['active_idx'] + 1) % len(valid_tokens)
-    
+    for _ in range(len(api_data['tokens'])):
+        token = api_data['tokens'][api_data['active_idx'] % len(api_data['tokens'])]
+        # Advance index for Round-Robin Load Balancing
+        api_data['active_idx'] = (api_data['active_idx'] + 1) % len(api_data['tokens'])
+        
+        if token in valid_tokens and token not in api_data['exhausted']:
+            if api_data['usage'].get(token, 0) < 1000:
+                if token not in api_clients:
+                    api_clients[token] = MailTD(token)
+                save_system_data()
+                return api_clients[token], token
+            else:
+                mark_api_exhausted(token)
+                
     raise Exception("All APIs Exhausted")
 
 def create_mail_with_fallback(clean_name=None):
-    # 1. Try Mail.td APIs
-    try:
-        client, token = get_active_client()
-        if api_data['usage'].get(token, 0) < 1000:
+    failed_tokens = set()
+    
+    # 1. Smart Failover: Try all available Mail.td APIs one by one
+    for _ in range(len(api_data['tokens'])):
+        try:
+            client, token = get_active_client(exclude_tokens=failed_tokens)
+            
             domains = client.accounts.list_domains()
             domain_name = domains[0].domain if hasattr(domains[0], 'domain') else domains[0]
             
             email_address = f"{clean_name}@{domain_name}" if clean_name else f"{''.join(random.choices(string.ascii_lowercase + string.digits, k=8))}@{domain_name}"
             account = client.accounts.create(email_address, password="propassword123")
             return account.id, account.address, token 
-        else:
-            mark_api_exhausted(token)
-    except Exception as e:
-        error_msg = str(e).lower()
-        if clean_name and ("already exists" in error_msg or "taken" in error_msg or "400" in error_msg):
-            raise Exception("NameTaken")
+            
+        except Exception as e:
+            error_msg = str(e).lower()
+            if clean_name and ("already exists" in error_msg or "taken" in error_msg or "400" in error_msg):
+                raise Exception("NameTaken") # Stop if name is simply unavailable
+            
+            # If server error or token fails, add to failed list and try the next API
+            if 'token' in locals():
+                failed_tokens.add(token)
 
-    # 2. Ultimate Fallback to 1secmail if Mail.td fails
+    # 2. Ultimate Fallback to 1secmail ONLY if ALL Mail.td APIs fail
     try:
         domain_name = "1secmail.com" 
         email_address = f"{clean_name}@{domain_name}" if clean_name else f"{''.join(random.choices(string.ascii_lowercase + string.digits, k=8))}@{domain_name}"
@@ -256,7 +270,6 @@ def auto_check_mail():
                                 account['msg_ids'].append(sent_msg.message_id)
                     else:
                         account_id = account['account_id']
-                        if "YOUR_" in acc_token or not acc_token: _, acc_token = get_active_client()
                         if acc_token not in api_clients: api_clients[acc_token] = MailTD(acc_token)
                         temp_client = api_clients[acc_token]
                         
@@ -500,7 +513,8 @@ def handle_callback(call):
                 if token in api_data['exhausted']:
                     days_left = 30 - (datetime.now() - datetime.fromtimestamp(api_data['exhausted'][token])).days
                     status = f"🔴 Exhausted (Resets in {days_left}d)"
-                elif i == api_data['active_idx']: status = "🔵 Currently Using"
+                elif token == api_data['tokens'][api_data['active_idx'] % len(api_data['tokens'])]: 
+                    status = "🔵 Next in Line"
                 
                 short_token = f"{token[:6]}...{token[-4:]}" if len(token) > 10 else token
                 api_info += f"<b>{i+1}.</b> <code>{short_token}</code>\n└ Ops: <b>{usage} / 1000</b> | {status}\n\n"
@@ -548,7 +562,7 @@ if __name__ == "__main__":
     load_all_data_from_firebase()
     threading.Thread(target=run_web_server, daemon=True).start()
     threading.Thread(target=auto_check_mail, daemon=True).start()
-    print("🚀 Ultimate Fallback Bot is Live...")
+    print("🚀 Ultimate Fallback Bot with Load Balancing is Live...")
     while True:
         try: bot.polling(none_stop=True, interval=0, timeout=20)
         except Exception: time.sleep(5)
