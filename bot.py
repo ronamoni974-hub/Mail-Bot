@@ -124,7 +124,6 @@ def get_active_client(exclude_tokens=None):
 
     for _ in range(len(api_data['tokens'])):
         token = api_data['tokens'][api_data['active_idx'] % len(api_data['tokens'])]
-        # Advance index for Round-Robin Load Balancing
         api_data['active_idx'] = (api_data['active_idx'] + 1) % len(api_data['tokens'])
         
         if token in valid_tokens and token not in api_data['exhausted']:
@@ -140,29 +139,21 @@ def get_active_client(exclude_tokens=None):
 
 def create_mail_with_fallback(clean_name=None):
     failed_tokens = set()
-    
-    # 1. Smart Failover: Try all available Mail.td APIs one by one
     for _ in range(len(api_data['tokens'])):
         try:
             client, token = get_active_client(exclude_tokens=failed_tokens)
-            
             domains = client.accounts.list_domains()
             domain_name = domains[0].domain if hasattr(domains[0], 'domain') else domains[0]
             
             email_address = f"{clean_name}@{domain_name}" if clean_name else f"{''.join(random.choices(string.ascii_lowercase + string.digits, k=8))}@{domain_name}"
             account = client.accounts.create(email_address, password="propassword123")
             return account.id, account.address, token 
-            
         except Exception as e:
             error_msg = str(e).lower()
             if clean_name and ("already exists" in error_msg or "taken" in error_msg or "400" in error_msg):
-                raise Exception("NameTaken") # Stop if name is simply unavailable
-            
-            # If server error or token fails, add to failed list and try the next API
-            if 'token' in locals():
-                failed_tokens.add(token)
+                raise Exception("NameTaken")
+            if 'token' in locals(): failed_tokens.add(token)
 
-    # 2. Ultimate Fallback to 1secmail ONLY if ALL Mail.td APIs fail
     try:
         domain_name = "1secmail.com" 
         email_address = f"{clean_name}@{domain_name}" if clean_name else f"{''.join(random.choices(string.ascii_lowercase + string.digits, k=8))}@{domain_name}"
@@ -206,7 +197,7 @@ def is_banned(chat_id):
         return True
     return False
 
-# --- Helper Functions ---
+# --- Helper Functions (Updated Extractor) ---
 def get_service_logo(sender):
     s = str(sender).lower()
     if 'facebook' in s or 'fb' in s: return '📘 Facebook'
@@ -220,26 +211,44 @@ def extract_and_format(subject, text_body, html_body=""):
     subject_text = subject if subject else "No Subject"
     clean_text = str(text_body) if text_body else ""
     clean_html = ""
-    if html_body:
-        clean_html = re.sub(r'\s+', ' ', re.sub(r'<[^>]+>', ' ', re.sub(r'<(script|style).*?>.*?</\1>', ' ', str(html_body), flags=re.IGNORECASE | re.DOTALL))).strip()
     
-    search_text = f"{subject_text} {clean_text} {clean_html}"
-    otp_match = re.search(r'\b(\d{4,8})\b', search_text)
-    otp_section = f"🔑 <b>Verification Code :</b> <code>{otp_match.group(1)}</code>\n\n" if otp_match else ""
+    if html_body:
+        clean_html = re.sub(r'<(script|style).*?>.*?</\1>', ' ', str(html_body), flags=re.IGNORECASE | re.DOTALL)
+        clean_html = re.sub(r'<br\s*/?>|</p>|</div>', '\n', clean_html, flags=re.IGNORECASE)
+        clean_html = re.sub(r'<[^>]+>', ' ', clean_html)
+        clean_html = re.sub(r'[ \t]+', ' ', clean_html).strip()
+        clean_html = re.sub(r'\n+', '\n', clean_html)
+    
+    search_text = f"{subject_text}\n{clean_text}\n{clean_html}"
+    
+    # Advanced Smart Regex for OTP (Catches Numbers, Alphanumerics, and Spaced Texts like Instagram)
+    otp_match = re.search(r'\b(\d{4,8})\b|\b([a-zA-Z0-9](?:\s+[a-zA-Z0-9]){5,7})\b|\b([A-Z0-9]{5,8})\b', search_text)
+    
+    extracted_otp = ""
+    if otp_match:
+        extracted_otp = next((g for g in otp_match.groups() if g), "").strip()
+        # Remove spaces so user can copy easily (e.g. "u j o r y P I c" -> "ujoryPIc")
+        if len(extracted_otp.replace(" ", "")) >= 4:
+            extracted_otp = extracted_otp.replace(" ", "")
+
+    otp_section = f"🔑 <b>Verification Code :</b> <code>{extracted_otp}</code>\n\n" if extracted_otp else ""
+    
     link_match = re.search(r'(https?://[^\s\"\'<>]+)', search_text)
     extracted_link = link_match.group(1) if link_match else None
     
     display_body = clean_text.strip()
     if len(display_body) < 15 and clean_html: display_body = clean_html
     if not display_body: display_body = "No Content"
-    return otp_section, re.sub(r'\b(\d{4,8})\b', r'<code>\1</code>', html.escape(display_body)), extracted_link
+    
+    escaped_body = html.escape(display_body[:800])
+    return otp_section, escaped_body, extracted_link
 
 def generate_mail_layout(email_address):
     layout = f"✅ <b>Mail Assigned Successfully !</b>\n\n📧 <b>Address :</b> <code>{email_address}</code>\n\n📡 <b>Status :</b> Live Sync Active\n\n<blockquote>•  Waiting for new messages ⬇️</blockquote>"
     markup = InlineKeyboardMarkup(row_width=2).add(InlineKeyboardButton("🔄 Switch Mail", callback_data="quick_switch"), InlineKeyboardButton("🔄 Force Fetch", callback_data="force_fetch"))
     return layout, markup
 
-# --- Auto Checker Engine ---
+# --- Auto Checker Engine (Fix: Crash Prevented) ---
 def auto_check_mail():
     while True:
         try:
@@ -253,42 +262,54 @@ def auto_check_mail():
                     email_addr = account['email']
                     needs_sync = False
                     
-                    if acc_token == "1secmail_fallback":
-                        login, domain = email_addr.split('@')
-                        resp = requests.get(f"https://www.1secmail.com/api/v1/?action=getMessages&login={login}&domain={domain}").json()
-                        for msg_preview in resp:
-                            msg_id = msg_preview['id']
-                            if msg_id not in account['seen_msgs']:
-                                account['seen_msgs'].add(msg_id)
-                                needs_sync = True
-                                full_msg = requests.get(f"https://www.1secmail.com/api/v1/?action=readMessage&login={login}&domain={domain}&id={msg_id}").json()
-                                otp_section, smart_body, verify_link = extract_and_format(full_msg.get('subject', ''), full_msg.get('textBody', ''), full_msg.get('htmlBody', ''))
-                                mail_alert = f"✅ <b>New Message !</b>\n\n🏢 <b>From :</b> {get_service_logo(full_msg.get('from', ''))}\n📧 <b>To :</b> <code>{email_addr}</code>\n\n{otp_section}<blockquote>💬 {smart_body[:500]}...</blockquote>"
-                                markup = InlineKeyboardMarkup()
-                                if verify_link: markup.add(InlineKeyboardButton("🔗 Open Link", url=verify_link))
-                                sent_msg = bot.send_message(chat_id, mail_alert, reply_markup=markup)
-                                account['msg_ids'].append(sent_msg.message_id)
-                    else:
-                        account_id = account['account_id']
-                        if acc_token not in api_clients: api_clients[acc_token] = MailTD(acc_token)
-                        temp_client = api_clients[acc_token]
+                    try:
+                        if acc_token == "1secmail_fallback":
+                            login, domain = email_addr.split('@')
+                            resp = requests.get(f"https://www.1secmail.com/api/v1/?action=getMessages&login={login}&domain={domain}", timeout=10).json()
+                            for msg_preview in resp:
+                                msg_id = msg_preview['id']
+                                if msg_id not in account['seen_msgs']:
+                                    account['seen_msgs'].add(msg_id)
+                                    needs_sync = True
+                                    full_msg = requests.get(f"https://www.1secmail.com/api/v1/?action=readMessage&login={login}&domain={domain}&id={msg_id}", timeout=10).json()
+                                    subject = full_msg.get('subject', 'No Subject')
+                                    sender = full_msg.get('from', 'Unknown')
+                                    otp_section, smart_body, verify_link = extract_and_format(subject, full_msg.get('textBody', ''), full_msg.get('htmlBody', ''))
+                                    mail_alert = f"✅ <b>New Message Received !</b>\n\n🏢 <b>From :</b> {get_service_logo(sender)} <i>({html.escape(sender)})</i>\n📧 <b>To :</b> <code>{email_addr}</code>\n📌 <b>Subject :</b> {html.escape(subject)}\n\n{otp_section}<blockquote>💬 <b>Message :</b>\n{smart_body[:500]}...</blockquote>"
+                                    markup = InlineKeyboardMarkup()
+                                    if verify_link: markup.add(InlineKeyboardButton("🔗 Open Link", url=verify_link))
+                                    sent_msg = bot.send_message(chat_id, mail_alert, reply_markup=markup, disable_web_page_preview=True)
+                                    account['msg_ids'].append(sent_msg.message_id)
+                        else:
+                            account_id = account['account_id']
+                            if acc_token not in api_clients: api_clients[acc_token] = MailTD(acc_token)
+                            temp_client = api_clients[acc_token]
+                            
+                            messages, _ = temp_client.messages.list(account_id)
+                            for msg_preview in messages:
+                                msg_id = msg_preview.id
+                                if msg_id not in account['seen_msgs']:
+                                    account['seen_msgs'].add(msg_id)
+                                    needs_sync = True
+                                    full_msg = temp_client.messages.get(account_id, msg_id)
+                                    
+                                    subject = getattr(full_msg, 'subject', 'No Subject')
+                                    sender = getattr(full_msg, 'from_address', getattr(full_msg, 'sender', 'Unknown'))
+                                    otp_section, smart_body, verify_link = extract_and_format(subject, getattr(full_msg, 'text_body', ''), getattr(full_msg, 'html_body', ''))
+                                    
+                                    mail_alert = f"✅ <b>New Message Received !</b>\n\n🏢 <b>From :</b> {get_service_logo(sender)} <i>({html.escape(sender)})</i>\n📧 <b>To :</b> <code>{email_addr}</code>\n📌 <b>Subject :</b> {html.escape(subject)}\n\n{otp_section}<blockquote>💬 <b>Message :</b>\n{smart_body[:500]}...</blockquote>"
+                                    markup = InlineKeyboardMarkup()
+                                    if verify_link: markup.add(InlineKeyboardButton("🔗 Open Link", url=verify_link))
+                                    sent_msg = bot.send_message(chat_id, mail_alert, reply_markup=markup, disable_web_page_preview=True)
+                                    account['msg_ids'].append(sent_msg.message_id)
+                    except Exception as e:
+                        print(f"Error checking {email_addr}: {e}")
+                        pass # Ignore individual mail checking errors so loop continues safely
                         
-                        messages, _ = temp_client.messages.list(account_id)
-                        for msg_preview in messages:
-                            msg_id = msg_preview.id
-                            if msg_id not in account['seen_msgs']:
-                                account['seen_msgs'].add(msg_id)
-                                needs_sync = True
-                                full_msg = temp_client.messages.get(account_id, msg_id)
-                                otp_section, smart_body, verify_link = extract_and_format(full_msg.subject, getattr(full_msg, 'text_body', ''), getattr(full_msg, 'html_body', ''))
-                                mail_alert = f"✅ <b>New Message !</b>\n\n🏢 <b>From :</b> {get_service_logo(getattr(full_msg, 'from_address', getattr(full_msg, 'sender', '')))}\n📧 <b>To :</b> <code>{email_addr}</code>\n\n{otp_section}<blockquote>💬 {smart_body[:500]}...</blockquote>"
-                                markup = InlineKeyboardMarkup()
-                                if verify_link: markup.add(InlineKeyboardButton("🔗 Open Link", url=verify_link))
-                                sent_msg = bot.send_message(chat_id, mail_alert, reply_markup=markup)
-                                account['msg_ids'].append(sent_msg.message_id)
-                    
                     if needs_sync: save_user_data(chat_id)
-        except Exception: pass
+        except Exception as e: 
+            print(f"Auto Checker Loop Error: {e}")
+            pass
         time.sleep(3)
 
 # --- Init User ---
