@@ -36,7 +36,7 @@ ADMIN_ID = "6670461311"
 user_data = {}
 banned_users = set()
 bot_stats = {'total_mails_generated': 0}
-system_data = {'active_promos': {}, 'bot_active': True} # Added bot_active flag
+system_data = {'active_promos': {}, 'bot_active': True} 
 
 api_data = {
     'tokens': [
@@ -60,7 +60,7 @@ def save_system_data():
         db.collection('system').document('bot_stats').set(bot_stats)
         db.collection('system').document('settings').set({'bot_active': system_data.get('bot_active', True)})
     except Exception as e:
-        print(f"Firebase System Save Error: {e}")
+        pass
 
 def save_user_data(chat_id):
     if not db: return
@@ -70,7 +70,7 @@ def save_user_data(chat_id):
             acc['seen_msgs'] = list(acc.get('seen_msgs', []))
         db.collection('users').document(str(chat_id)).set(data_to_save)
     except Exception as e:
-        print(f"Firebase User Save Error: {e}")
+        pass
 
 def load_all_data_from_firebase():
     global api_data, banned_users, bot_stats, user_data, system_data
@@ -98,14 +98,21 @@ def load_all_data_from_firebase():
             user_data[uid] = u_data
         print("✅ Data Loading Complete!")
     except Exception as e:
-        print(f"Firebase Load Error: {e}")
+        pass
 
-# --- Mail.gw (Premium Alternative) Helper ---
+# --- Mail.gw (Premium Alternative) Helper with Anti-Block Headers ---
+def get_headers():
+    return {
+        "Accept": "application/json",
+        "Content-Type": "application/json",
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+    }
+
 def get_mailgw_domains():
     try:
-        resp = requests.get("https://api.mail.gw/domains", timeout=10).json()
+        resp = requests.get("https://api.mail.gw/domains", headers=get_headers(), timeout=10).json()
         return [d['domain'] for d in resp.get('hydra:member', [])]
-    except: return ["rambler.ru", "mailto.plus"] # Fallback fake domains if api fails
+    except: return ["rambler.ru"] 
 
 def create_mailgw_account(clean_name=None):
     domains = get_mailgw_domains()
@@ -114,15 +121,20 @@ def create_mailgw_account(clean_name=None):
     password = "ProPassword123!"
     
     payload = {"address": email_addr, "password": password}
-    resp = requests.post("https://api.mail.gw/accounts", json=payload, timeout=10)
-    if resp.status_code == 201:
-        data = resp.json()
-        t_resp = requests.post("https://api.mail.gw/token", json=payload, timeout=10).json()
-        return data['id'], email_addr, t_resp['token']
-    else:
-        if "already used" in resp.text.lower() or "taken" in resp.text.lower():
-            raise Exception("NameTaken")
-        raise Exception("API Error")
+    try:
+        resp = requests.post("https://api.mail.gw/accounts", json=payload, headers=get_headers(), timeout=10)
+        if resp.status_code == 201:
+            data = resp.json()
+            t_resp = requests.post("https://api.mail.gw/token", json=payload, headers=get_headers(), timeout=10).json()
+            return data['id'], email_addr, t_resp['token']
+        else:
+            err_text = resp.text.lower()
+            if "already used" in err_text or "taken" in err_text:
+                raise Exception("NameTaken")
+            error_msg = resp.json().get('message', resp.text[:50]) if '{' in resp.text else resp.text[:50]
+            raise Exception(f"Mail.gw Server: {resp.status_code} - {error_msg}")
+    except requests.exceptions.RequestException:
+        raise Exception("Connection Failed: সার্ভারের সাথে কানেক্ট করা যাচ্ছে না।")
 
 # --- Load Balancing & Mail Creation ---
 def restore_apis():
@@ -183,7 +195,6 @@ def create_mail_with_server(chat_id, clean_name=None):
                     raise Exception("NameTaken")
                 if 'token' in locals(): failed_tokens.add(token)
 
-    # Mail.gw Premium Server (Fallback & Default)
     acc_id, email_addr, token = create_mailgw_account(clean_name)
     return acc_id, email_addr, token, 'mailgw'
 
@@ -224,11 +235,9 @@ def get_back_button():
 def check_anti_spam(chat_id):
     now = time.time()
     user_data[chat_id].setdefault('recent_mails', [])
-    # Clean up old records (> 5 mins)
     user_data[chat_id]['recent_mails'] = [m for m in user_data[chat_id]['recent_mails'] if now - m['time'] < 300]
     
     if len(user_data[chat_id]['recent_mails']) >= 3:
-        # Check if all recent mails have 0 messages
         spam = all(m['msg_count'] == 0 for m in user_data[chat_id]['recent_mails'])
         if spam:
             banned_users.add(str(chat_id))
@@ -246,15 +255,22 @@ def is_banned(chat_id):
         return True
     return False
 
-# --- Helper Functions ---
-def get_service_logo(sender):
+# --- UI Formatter Functions (Updated to mimic screenshot) ---
+def get_service_logo_and_name(sender):
     s = str(sender).lower()
-    if 'facebook' in s or 'fb' in s: return '📘 Facebook'
-    if 'instagram' in s or 'ig' in s: return '📸 Instagram'
-    if 'google' in s or 'gmail' in s: return '🇬 Google'
-    if 'tiktok' in s: return '🎵 TikTok'
-    if 'netflix' in s: return '🎬 Netflix'
-    return '🌐 Web Service'
+    if 'facebook' in s or 'fb' in s: return '📘', 'Facebook'
+    if 'instagram' in s or 'ig' in s: return '📸', 'Instagram'
+    if 'google' in s or 'gmail' in s: return '🇬', 'Google'
+    if 'tiktok' in s: return '🎵', 'TikTok'
+    if 'netflix' in s: return '🎬', 'Netflix'
+    if 'amazon' in s: return '🛒', 'Amazon'
+    if 'twitter' in s or 'x.com' in s: return '🐦', 'X (Twitter)'
+    
+    match = re.search(r'@([a-zA-Z0-9.-]+)', str(sender))
+    if match:
+        domain = match.group(1).split('.')[0].capitalize()
+        return '🌐', domain
+    return '🌐', 'Web Service'
 
 def extract_and_format(subject, text_body, html_body=""):
     subject_text = subject if subject else "No Subject"
@@ -278,8 +294,6 @@ def extract_and_format(subject, text_body, html_body=""):
     if otp_match:
         extracted_otp = next((g for g in otp_match.groups() if g), "").strip()
 
-    otp_section = f"🔑 <b>Verification Code:</b>\n<blockquote><code>{extracted_otp}</code></blockquote>\n<i>(Click the code above to copy)</i>\n\n" if extracted_otp else ""
-    
     link_match = re.search(r'(https?://[^\s\"\'<>]+)', search_text)
     extracted_link = link_match.group(1) if link_match else None
     
@@ -288,7 +302,7 @@ def extract_and_format(subject, text_body, html_body=""):
     if not display_body: display_body = "No Content"
     
     escaped_body = html.escape(display_body[:800])
-    return otp_section, escaped_body, extracted_link
+    return extracted_otp, escaped_body, extracted_link
 
 def generate_mail_layout(email_address, srv_type):
     server_name = "Premium Mail.gw" if srv_type == 'mailgw' else "MailTD API"
@@ -312,6 +326,7 @@ def auto_check_mail():
                     needs_sync = False
                     
                     try:
+                        messages_to_process = []
                         if srv_type == 'mailgw':
                             headers = {"Authorization": f"Bearer {acc_token}"}
                             resp = requests.get("https://api.mail.gw/messages", headers=headers, timeout=10)
@@ -321,25 +336,19 @@ def auto_check_mail():
                                     if msg_id not in account['seen_msgs']:
                                         account['seen_msgs'].add(msg_id)
                                         needs_sync = True
-                                        
-                                        # Update Spam count
                                         for m in data.get('recent_mails', []):
                                             if m['email'] == email_addr: m['msg_count'] += 1
-
+                                            
                                         full_msg_resp = requests.get(f"https://api.mail.gw/messages/{msg_id}", headers=headers, timeout=10)
                                         if full_msg_resp.status_code == 200:
                                             full_msg = full_msg_resp.json()
-                                            subject = full_msg.get('subject', 'No Subject')
-                                            sender = full_msg.get('from', {}).get('address', 'Unknown')
-                                            otp_section, smart_body, verify_link = extract_and_format(subject, full_msg.get('text', ''), full_msg.get('html', ''))
-                                            
-                                            mail_alert = f"🔔 <b>New Message Alert!</b>\n\n🏢 <b>From :</b> {get_service_logo(sender)} <i>({html.escape(sender)})</i>\n📧 <b>To :</b> <code>{email_addr}</code>\n📌 <b>Subject :</b> {html.escape(subject)}\n\n{otp_section}<blockquote>💬 <b>Content Preview :</b>\n{smart_body[:500]}...</blockquote>"
-                                            markup = InlineKeyboardMarkup()
-                                            if verify_link: markup.add(InlineKeyboardButton("🔗 Direct Verify Link", url=verify_link))
-                                            sent_msg = bot.send_message(chat_id, mail_alert, reply_markup=markup, disable_web_page_preview=True)
-                                            account['msg_ids'].append(sent_msg.message_id)
+                                            messages_to_process.append({
+                                                'subject': full_msg.get('subject', 'No Subject'),
+                                                'sender': full_msg.get('from', {}).get('address', 'Unknown'),
+                                                'text': full_msg.get('text', ''),
+                                                'html': full_msg.get('html', '')
+                                            })
                         else:
-                            # MailTD Logic
                             account_id = account['account_id']
                             if acc_token not in api_clients: api_clients[acc_token] = MailTD(acc_token)
                             temp_client = api_clients[acc_token]
@@ -350,28 +359,52 @@ def auto_check_mail():
                                 if msg_id not in account['seen_msgs']:
                                     account['seen_msgs'].add(msg_id)
                                     needs_sync = True
-
-                                    # Update Spam count
                                     for m in data.get('recent_mails', []):
                                         if m['email'] == email_addr: m['msg_count'] += 1
 
                                     full_msg = temp_client.messages.get(account_id, msg_id)
-                                    subject = getattr(full_msg, 'subject', 'No Subject')
-                                    sender = getattr(full_msg, 'from_address', getattr(full_msg, 'sender', 'Unknown'))
-                                    otp_section, smart_body, verify_link = extract_and_format(subject, getattr(full_msg, 'text_body', ''), getattr(full_msg, 'html_body', ''))
-                                    
-                                    mail_alert = f"🔔 <b>New Message Alert!</b>\n\n🏢 <b>From :</b> {get_service_logo(sender)} <i>({html.escape(sender)})</i>\n📧 <b>To :</b> <code>{email_addr}</code>\n📌 <b>Subject :</b> {html.escape(subject)}\n\n{otp_section}<blockquote>💬 <b>Content Preview :</b>\n{smart_body[:500]}...</blockquote>"
-                                    markup = InlineKeyboardMarkup()
-                                    if verify_link: markup.add(InlineKeyboardButton("🔗 Direct Verify Link", url=verify_link))
-                                    sent_msg = bot.send_message(chat_id, mail_alert, reply_markup=markup, disable_web_page_preview=True)
-                                    account['msg_ids'].append(sent_msg.message_id)
+                                    messages_to_process.append({
+                                        'subject': getattr(full_msg, 'subject', 'No Subject'),
+                                        'sender': getattr(full_msg, 'from_address', getattr(full_msg, 'sender', 'Unknown')),
+                                        'text': getattr(full_msg, 'text_body', ''),
+                                        'html': getattr(full_msg, 'html_body', '')
+                                    })
+
+                        # 🎨 Send formatted UI for each new message
+                        for msg_data in messages_to_process:
+                            extracted_otp, smart_body, verify_link = extract_and_format(msg_data['subject'], msg_data['text'], msg_data['html'])
+                            logo, s_name = get_service_logo_and_name(msg_data['sender'])
+                            short_email = email_addr.split('@')[0]
+                            
+                            # Premium Box Style Formatting
+                            mail_alert = (
+                                f"╭ {logo} {s_name} • {short_email}\n"
+                                f"╰ 📌 Sub: {html.escape(msg_data['subject'][:25])}\n\n"
+                            )
+                            
+                            if extracted_otp:
+                                mail_alert += f"🔑 <b>Code:</b> <code>{extracted_otp}</code>\n\n"
+                                
+                            mail_alert += f"<blockquote>💬 {smart_body[:400]}...</blockquote>"
+                            
+                            # Inline Buttons
+                            markup = InlineKeyboardMarkup(row_width=2)
+                            row = []
+                            if extracted_otp:
+                                row.append(InlineKeyboardButton(f"📋 {extracted_otp}", callback_data=f"cp_{extracted_otp}"))
+                            if verify_link:
+                                row.append(InlineKeyboardButton("🔗 Open Link", url=verify_link))
+                                
+                            if row: markup.add(*row)
+                            
+                            sent_msg = bot.send_message(chat_id, mail_alert, reply_markup=markup, disable_web_page_preview=True)
+                            account['msg_ids'].append(sent_msg.message_id)
+
                     except Exception as e:
-                        print(f"Error checking {email_addr}: {e}")
                         pass 
                         
                     if needs_sync: save_user_data(chat_id)
         except Exception as e: 
-            print(f"Auto Checker Loop Error: {e}")
             pass
         time.sleep(3)
 
@@ -569,10 +602,7 @@ def broadcast_promo(button_message, promo_message):
         system_data['active_promos'].clear()
         for uid in list(user_data.keys()):
             try:
-                # Add a premium notification header format
                 header = "🌟 <b>Important Notice from Admin</b> 🌟\n━━━━━━━━━━━━━━━━━━━━\n\n"
-                
-                # Check if it's text. If text, prepend header. Else just copy message.
                 if promo_message.content_type == 'text':
                     sent = bot.send_message(uid, f"{header}{promo_message.text}", reply_markup=markup if markup.keyboard else None)
                 else:
@@ -587,7 +617,12 @@ def handle_callback(call):
     chat_id = str(call.message.chat.id)
     if is_banned(chat_id): return
     
-    if call.data == "cancel_custom":
+    if call.data.startswith('cp_'):
+        otp = call.data.split('_')[1]
+        # Shows a pop-up toast alert! (Natively tap-to-copy is inside the message itself)
+        bot.answer_callback_query(call.id, f"✅ Code: {otp} \n\n(Tap the code inside the message text to copy automatically!)", show_alert=True)
+
+    elif call.data == "cancel_custom":
         bot.clear_step_handler_by_chat_id(call.message.chat.id)
         for msg_id in user_data.get(chat_id, {}).get('custom_mail_msgs', []):
             try: bot.delete_message(chat_id, msg_id)
@@ -620,7 +655,6 @@ def handle_callback(call):
         save_user_data(chat_id)
         bot.answer_callback_query(call.id, "Server Updated Successfully!")
         
-        # Redraw menu
         curr_srv = new_pref
         srv_text = "🌐 <b>Select Your Preferred Server</b>\n\nযেকোনো সোশ্যাল মিডিয়া অ্যাকাউন্ট খুলতে হাই-কোয়ালিটি সার্ভার বেছে নিন:"
         markup = InlineKeyboardMarkup(row_width=1)
@@ -669,7 +703,6 @@ def handle_callback(call):
             total_users = len(user_data)
             active_accounts = sum(len(d.get('accounts', [])) for d in user_data.values())
             
-            # Count Mail.gw vs MailTD Usage
             mgw = mtd = 0
             for d in user_data.values():
                 for acc in d.get('accounts', []):
@@ -723,7 +756,7 @@ if __name__ == "__main__":
     load_all_data_from_firebase()
     threading.Thread(target=run_web_server, daemon=True).start()
     threading.Thread(target=auto_check_mail, daemon=True).start()
-    print("🚀 Premium Pro Mail Bot with Load Balancing is Live...")
+    print("🚀 Premium Pro Mail Bot (UI Updated) is Live...")
     while True:
         try: bot.polling(none_stop=True, interval=0, timeout=20)
         except Exception: time.sleep(5)
