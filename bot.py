@@ -38,14 +38,16 @@ banned_users = set()
 bot_stats = {'total_mails_generated': 0}
 system_data = {'active_promos': {}, 'bot_active': True} 
 
+# Updated API Data Structure for Dual Servers
 api_data = {
-    'tokens': [ 
+    'mailtd_tokens': [ 
         'td_18c938ad445ea882ebc1110b22723e1ca1ddef7911dde89e80a095f3c2120119', 
         'td_d4ee26c571da82546f814b6d1595f59f780489afc162254cba00009fba83f48d', 
         'td_1d45403d07853397e061d49f21c1fa9e0a80816e0005401a11bdf84218d496ee',  
         'td_4af40882b5019f9be105e7b4e3beeeaf1cffd81060fc383d824622c4470d73f0'  
     ],
-    'active_idx': 0,
+    'tmailor_tokens': [], # Admin can manage Tmailor API here
+    'active_idx': {'mailtd': 0, 'tmailor': 0},
     'usage': {},
     'exhausted': {}
 }
@@ -78,7 +80,13 @@ def load_all_data_from_firebase():
     try:
         print("⏳ Loading data from Firebase...")
         api_doc = db.collection('system').document('api_data').get()
-        if api_doc.exists: api_data.update(api_doc.to_dict())
+        if api_doc.exists: 
+            loaded = api_doc.to_dict()
+            if 'mailtd_tokens' in loaded: api_data['mailtd_tokens'] = loaded['mailtd_tokens']
+            if 'tmailor_tokens' in loaded: api_data['tmailor_tokens'] = loaded['tmailor_tokens']
+            if 'usage' in loaded: api_data['usage'] = loaded['usage']
+            if 'exhausted' in loaded: api_data['exhausted'] = loaded['exhausted']
+            if 'active_idx' in loaded: api_data['active_idx'] = loaded['active_idx']
             
         ban_doc = db.collection('system').document('banned_users').get()
         if ban_doc.exists: banned_users = set(ban_doc.to_dict().get('users', []))
@@ -100,14 +108,14 @@ def load_all_data_from_firebase():
     except Exception as e:
         pass
 
-# --- Fast Fallback Helper (IG Friendly) ---
-def get_fallback_domain():
+# --- Tmailor / Fast IG Fallback Helper ---
+def get_tmailor_domain():
     try:
         resp = requests.get("https://www.1secmail.com/api/v1/?action=getDomainList", timeout=5).json()
         for d in ['esiix.com', 'xojxe.com', 'yoggm.com']:
             if d in resp: return d
         return resp[0]
-    except: return "1secmail.com"
+    except: return "tmailor.com"
 
 # --- Load Balancing & Mail Creation ---
 def restore_apis():
@@ -128,46 +136,63 @@ def mark_api_exhausted(token):
         try: bot.send_message(ADMIN_ID, f"⚠️ <b>API Limit Reached!</b>\n\nএকটি API এর লিমিট শেষ। পরবর্তী API তে সুইচ করা হচ্ছে।")
         except: pass
 
-def get_active_client(exclude_tokens=None):
+def get_active_client(server_type='mailtd', exclude_tokens=None):
     restore_apis()
     if exclude_tokens is None: exclude_tokens = set()
-    valid_tokens = [t for t in api_data.get('tokens', []) if len(t) > 10 and t not in exclude_tokens]
-    if not valid_tokens: raise Exception("All APIs Exhausted")
+    token_key = f"{server_type}_tokens"
+    valid_tokens = [t for t in api_data.get(token_key, []) if len(t) > 5 and t not in exclude_tokens]
+    
+    if not valid_tokens: 
+        if server_type == 'mailtd': raise Exception("All MailTD APIs Exhausted")
+        return None, "fallback_token" # Tmailor fallback logic allows working without explicit tokens
 
-    for _ in range(len(api_data['tokens'])):
-        token = api_data['tokens'][api_data['active_idx'] % len(api_data['tokens'])]
-        api_data['active_idx'] = (api_data['active_idx'] + 1) % len(api_data['tokens'])
+    idx = api_data['active_idx'].get(server_type, 0)
+    for _ in range(len(api_data[token_key])):
+        token = api_data[token_key][idx % len(api_data[token_key])]
+        idx = (idx + 1) % len(api_data[token_key])
+        api_data['active_idx'][server_type] = idx
         
         if token in valid_tokens and token not in api_data['exhausted']:
             if api_data['usage'].get(token, 0) < 1000:
-                if token not in api_clients:
-                    api_clients[token] = MailTD(token)
-                save_system_data()
-                return api_clients[token], token
+                if server_type == 'mailtd':
+                    if token not in api_clients: api_clients[token] = MailTD(token)
+                    save_system_data()
+                    return api_clients[token], token
+                elif server_type == 'tmailor':
+                    return "tmailor_client", token
             else:
                 mark_api_exhausted(token)
                 
-    raise Exception("All APIs Exhausted")
+    if server_type == 'mailtd': raise Exception("All APIs Exhausted")
+    return None, "fallback_token"
 
-def create_mail_with_fallback(clean_name=None):
-    failed_tokens = set()
-    for _ in range(len(api_data.get('tokens', []))):
-        try:
-            client, token = get_active_client(exclude_tokens=failed_tokens)
-            domains = client.accounts.list_domains()
-            domain_name = domains[0].domain if hasattr(domains[0], 'domain') else domains[0]
-            email_address = f"{clean_name}@{domain_name}" if clean_name else f"{''.join(random.choices(string.ascii_lowercase + string.digits, k=8))}@{domain_name}"
-            account = client.accounts.create(email_address, password="propassword123")
-            return account.id, account.address, token, 'mailtd'
-        except Exception as e:
-            error_msg = str(e).lower()
-            if clean_name and ("already exists" in error_msg or "taken" in error_msg or "400" in error_msg):
-                raise Exception("NameTaken")
-            if 'token' in locals(): failed_tokens.add(token)
+def create_mail_with_server(chat_id, clean_name=None):
+    preferred = user_data[chat_id].get('server_pref', 'mailtd')
+    
+    if preferred == 'mailtd':
+        failed_tokens = set()
+        for _ in range(len(api_data.get('mailtd_tokens', []))):
+            try:
+                client, token = get_active_client('mailtd', exclude_tokens=failed_tokens)
+                domains = client.accounts.list_domains()
+                domain_name = domains[0].domain if hasattr(domains[0], 'domain') else domains[0]
+                email_address = f"{clean_name}@{domain_name}" if clean_name else f"{''.join(random.choices(string.ascii_lowercase + string.digits, k=8))}@{domain_name}"
+                account = client.accounts.create(email_address, password="propassword123")
+                return account.id, account.address, token, 'mailtd'
+            except Exception as e:
+                error_msg = str(e).lower()
+                if clean_name and ("already exists" in error_msg or "taken" in error_msg or "400" in error_msg):
+                    raise Exception("NameTaken")
+                if 'token' in locals(): failed_tokens.add(token)
 
-    domain = get_fallback_domain()
-    email_addr = f"{clean_name}@{domain}" if clean_name else f"{''.join(random.choices(string.ascii_lowercase + string.digits, k=10))}@{domain}"
-    return "fallback_acc", email_addr, "fallback_token", 'fallback'
+        # Auto fallback to Tmailor if all MailTD fail
+        preferred = 'tmailor'
+
+    if preferred == 'tmailor':
+        _, token = get_active_client('tmailor')
+        domain = get_tmailor_domain()
+        email_addr = f"{clean_name}@{domain}" if clean_name else f"{''.join(random.choices(string.ascii_lowercase + string.digits, k=10))}@{domain}"
+        return "tmailor_acc", email_addr, token, 'tmailor'
 
 # --- Web Server ---
 app = Flask('')
@@ -178,13 +203,13 @@ def run_web_server(): app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 80
 # --- Premium Menus ---
 def get_main_menu(chat_id):
     markup = ReplyKeyboardMarkup(resize_keyboard=True, row_width=2)
-    # Premium Layout Grid
-    markup.add(KeyboardButton("✨ Generate Premium Mail"))
-    markup.add(KeyboardButton("✏️ Custom ID"), KeyboardButton("🏠 Dashboard"))
-    markup.add(KeyboardButton("👤 My Profile"), KeyboardButton("🗑️ Delete Mail"))
-    markup.add(KeyboardButton("⚡ About System"))
+    # Beautifully arranged position
+    markup.row(KeyboardButton("✨ Generate Premium Mail"))
+    markup.row(KeyboardButton("✏️ Custom ID"), KeyboardButton("🌐 Server Change"))
+    markup.row(KeyboardButton("🏠 Dashboard"), KeyboardButton("🗑️ Delete Mail"))
+    markup.row(KeyboardButton("👤 My Profile"), KeyboardButton("⚡ About System"))
     if str(chat_id) == ADMIN_ID: 
-        markup.add(KeyboardButton("⚙️ Admin Panel"))
+        markup.row(KeyboardButton("⚙️ Admin Panel"))
     return markup
 
 def get_admin_menu():
@@ -193,7 +218,7 @@ def get_admin_menu():
     markup.add(InlineKeyboardButton(bot_state, callback_data="admin_toggle_bot"))
     markup.add(InlineKeyboardButton("👥 User List", callback_data="admin_users"),
                InlineKeyboardButton("📊 Statistics", callback_data="admin_stats"))
-    markup.add(InlineKeyboardButton("🔑 Manage APIs", callback_data="admin_apis"),
+    markup.add(InlineKeyboardButton("🔑 Manage APIs", callback_data="admin_apis_select"),
                InlineKeyboardButton("📢 Send Notice", callback_data="admin_send_promo"))
     markup.add(InlineKeyboardButton("🚫 Suspend User", callback_data="admin_ban"),
                InlineKeyboardButton("✅ Activate User", callback_data="admin_unban"))
@@ -277,12 +302,13 @@ def extract_and_format(subject, text_body, html_body=""):
     return extracted_otp, escaped_body, extracted_link
 
 def generate_mail_layout(email_address, srv_type):
-    server_name = "Premium MailTD API" if srv_type == 'mailtd' else "Fallback API (Fast)"
-    layout = f"🎉 <b>Mail Generated Successfully!</b>\n\n📧 <b>Your Address :</b>\n<code>{email_address}</code>\n\n📡 <b>Server :</b> {server_name}\n🟢 <b>Status :</b> Live Sync Active\n\n<blockquote>•  Listening for incoming mails... ⏳</blockquote>"
+    server_name = "Premium Mail.td API" if srv_type == 'mailtd' else "Premium Tmailor.com"
+    # Premium layout with Code-Block to enable native tap-to-copy
+    layout = f"🎉 <b>Premium Mail Generated!</b>\n\n📧 <b>Your Address :</b>\n<blockquote><code>{email_address}</code></blockquote>\n<i>(Tap the address above to copy securely)</i>\n\n📡 <b>Server :</b> {server_name}\n🟢 <b>Status :</b> Live Sync Active\n\n<blockquote>•  Listening for incoming mails... ⏳</blockquote>"
     
     markup = InlineKeyboardMarkup(row_width=2)
-    # Inline 1-Tap Copy Button added here
-    markup.add(InlineKeyboardButton(f"📋 Copy: {email_address}", callback_data="cpm_copy"))
+    # The button triggers a silent copy confirmation, no blocking pop-ups!
+    markup.add(InlineKeyboardButton(f"📋 {email_address}", callback_data=f"cp_{email_address}"))
     markup.add(InlineKeyboardButton("🔄 Switch Mail", callback_data="quick_switch"), InlineKeyboardButton("🔄 Force Sync", callback_data="force_fetch"))
     return layout, markup
 
@@ -303,7 +329,7 @@ def auto_check_mail():
                     
                     try:
                         messages_to_process = []
-                        if srv_type == 'fallback':
+                        if srv_type == 'tmailor':
                             login, domain = email_addr.split('@')
                             resp = requests.get(f"https://www.1secmail.com/api/v1/?action=getMessages&login={login}&domain={domain}", timeout=10)
                             if resp.status_code == 200:
@@ -385,7 +411,7 @@ def auto_check_mail():
 def init_user(message):
     chat_id = str(message.chat.id)
     if chat_id not in user_data:
-        user_data[chat_id] = {'accounts': [], 'active_index': -1, 'total_generated': 0, 'name': message.from_user.first_name or "Unknown", 'username': f"@{message.from_user.username}" if message.from_user.username else "N/A", 'joined': datetime.now().strftime("%Y-%m-%d"), 'custom_mail_msgs': []}
+        user_data[chat_id] = {'accounts': [], 'active_index': -1, 'total_generated': 0, 'name': message.from_user.first_name or "Unknown", 'username': f"@{message.from_user.username}" if message.from_user.username else "N/A", 'joined': datetime.now().strftime("%Y-%m-%d"), 'custom_mail_msgs': [], 'server_pref': 'mailtd'}
         save_user_data(chat_id)
 
 # --- Bot Handlers ---
@@ -422,15 +448,18 @@ def handle_text(message):
     if text == "✨ Generate Premium Mail":
         if check_anti_spam(chat_id): return
         
-        # Premium 3-Step Loading Animation
-        anim_msg = bot.send_message(chat_id, "<i>🔄 Initializing Handshake...</i>")
+        # Super Premium 3-Step Loading Animation
+        anim_msg = bot.send_message(chat_id, "<i>🔄 Establishing Secure Protocol...</i>")
         time.sleep(0.4)
-        bot.edit_message_text("<i>🛡️ Securing Connection & Bypassing Spam...</i>", chat_id, anim_msg.message_id)
+        bot.edit_message_text("<i>🛡️ Bypassing Spam Filters...</i>", chat_id, anim_msg.message_id)
         time.sleep(0.4)
-        bot.edit_message_text("<i>⚡ Allocating Premium Server...</i>", chat_id, anim_msg.message_id)
+        
+        srv_name = "Tmailor" if user_data[chat_id].get('server_pref') == 'tmailor' else "MailTD"
+        bot.edit_message_text(f"<i>⚡ Allocating {srv_name} Server...</i>", chat_id, anim_msg.message_id)
+        time.sleep(0.3)
         
         try:
-            acc_id, email_addr, used_token, srv_type = create_mail_with_fallback(clean_name=None)
+            acc_id, email_addr, used_token, srv_type = create_mail_with_server(chat_id)
             if srv_type == 'mailtd': api_data['usage'][used_token] = api_data['usage'].get(used_token, 0) + 1
             
             record_mail_creation(chat_id, email_addr)
@@ -454,6 +483,16 @@ def handle_text(message):
         save_user_data(chat_id)
         bot.register_next_step_handler(msg, process_custom_mail)
 
+    elif text == "🌐 Server Change":
+        curr_srv = user_data[chat_id].get('server_pref', 'mailtd')
+        srv_text = "🌐 <b>Select Your Preferred Server</b>\n\nযেকোনো সোশ্যাল মিডিয়া অ্যাকাউন্ট খুলতে হাই-কোয়ালিটি সার্ভার বেছে নিন:"
+        markup = InlineKeyboardMarkup(row_width=1)
+        markup.add(
+            InlineKeyboardButton(f"{'✅' if curr_srv == 'mailtd' else '⬜'} Default Mail.td", callback_data="set_srv_mailtd"),
+            InlineKeyboardButton(f"{'✅' if curr_srv == 'tmailor' else '⬜'} Premium Tmailor.com", callback_data="set_srv_tmailor")
+        )
+        bot.send_message(chat_id, srv_text, reply_markup=markup)
+
     elif text == "🏠 Dashboard":
         accounts = user_data[chat_id]['accounts']
         if not accounts: bot.send_message(chat_id, "⚠️ আপনার কোনো অ্যাক্টিভ মেইল নেই।")
@@ -462,7 +501,7 @@ def handle_text(message):
             markup = InlineKeyboardMarkup(row_width=1)
             for i, acc in enumerate(accounts):
                 status = "🟢 Active" if i == user_data[chat_id]['active_index'] else "⚪ Standby"
-                srv = "Default" if acc.get('server_type') == 'fallback' else "Premium"
+                srv = "Tmailor" if acc.get('server_type') == 'tmailor' else "MailTD"
                 dash_text += f"{i+1}. <code>{acc['email']}</code> [{status} - {srv}]\n\n"
                 markup.add(InlineKeyboardButton(f"🔄 Switch to Mail {i+1}", callback_data=f"switch_{i}"))
             bot.send_message(chat_id, dash_text, reply_markup=markup)
@@ -486,7 +525,7 @@ def handle_text(message):
     elif text == "⚡ About System":
         about_text = (
             "🚀 <b>Premium Temp Mail Bot</b>\n\n"
-            "• Engine: MailTD Architecture & Load Balancing\n"
+            "• Engine: MailTD Architecture & Tmailor Proxy\n"
             "• Performance: Zero-Lag Sync & Anti-Spam\n"
             "• Developer: <a href='https://t.me/Ad_Walid'>Md Walid</a>\n"
             "• Bot Admin: <a href='https://t.me/Ad_Walid'>Md Walid</a>\n\n"
@@ -509,7 +548,7 @@ def process_custom_mail(message):
         
     anim_msg = bot.send_message(chat_id, "<i>✨ Checking Name Availability...</i>")
     try:
-        acc_id, email_addr, used_token, srv_type = create_mail_with_fallback(clean_name)
+        acc_id, email_addr, used_token, srv_type = create_mail_with_server(chat_id, clean_name)
         if srv_type == 'mailtd': api_data['usage'][used_token] = api_data['usage'].get(used_token, 0) + 1
             
         record_mail_creation(chat_id, email_addr)
@@ -540,14 +579,15 @@ def process_custom_mail(message):
             bot.edit_message_text(f"❌ Error Details: {str(e)}", chat_id, anim_msg.message_id)
 
 # --- Admin API Flow ---
-def process_add_api(message):
+def process_add_api(message, srv_type):
     new_token = message.text.strip()
-    if len(new_token) > 10: 
-        if new_token not in api_data.get('tokens', []):
-            if 'tokens' not in api_data: api_data['tokens'] = []
-            api_data['tokens'].append(new_token)
+    if len(new_token) > 5: 
+        token_key = f"{srv_type}_tokens"
+        if new_token not in api_data.get(token_key, []):
+            if token_key not in api_data: api_data[token_key] = []
+            api_data[token_key].append(new_token)
             save_system_data()
-            bot.send_message(message.chat.id, f"✅ <b>API Added Successfully!</b>\n\nমোট API সংখ্যা এখন: {len(api_data['tokens'])}", reply_markup=get_back_button())
+            bot.send_message(message.chat.id, f"✅ <b>API Added Successfully!</b>\n\nমোট API সংখ্যা এখন: {len(api_data[token_key])}", reply_markup=get_back_button())
         else: bot.send_message(message.chat.id, "⚠️ এই API Token টি আগেই লিস্টে আছে।", reply_markup=get_back_button())
     else: bot.send_message(message.chat.id, "❌ ইনভ্যালিড টোকেন!", reply_markup=get_back_button())
 
@@ -595,11 +635,9 @@ def handle_callback(call):
     chat_id = str(call.message.chat.id)
     if is_banned(chat_id): return
     
-    # Handling Silent Copies
-    if call.data == "cpm_copy":
-        bot.answer_callback_query(call.id, "✅ Mail Address Copied!", show_alert=False)
-    elif call.data.startswith('cp_'):
-        bot.answer_callback_query(call.id, "✅ Code Copied!", show_alert=False)
+    # Silent Toast for Mail & OTP Copy!
+    if call.data.startswith('cp_'):
+        bot.answer_callback_query(call.id, "✅ Copied!", show_alert=False)
 
     elif call.data == "cancel_custom":
         bot.clear_step_handler_by_chat_id(call.message.chat.id)
@@ -627,6 +665,21 @@ def handle_callback(call):
             layout, markup = generate_mail_layout(acc['email'], acc.get('server_type', 'mailtd'))
             bot.edit_message_text(layout, chat_id, call.message.message_id, reply_markup=markup)
             save_user_data(chat_id)
+
+    elif call.data.startswith("set_srv_"):
+        new_pref = call.data.split('_')[2]
+        user_data[chat_id]['server_pref'] = new_pref
+        save_user_data(chat_id)
+        bot.answer_callback_query(call.id, "Server Updated Successfully!")
+        
+        curr_srv = new_pref
+        srv_text = "🌐 <b>Select Your Preferred Server</b>\n\nযেকোনো সোশ্যাল মিডিয়া অ্যাকাউন্ট খুলতে হাই-কোয়ালিটি সার্ভার বেছে নিন:"
+        markup = InlineKeyboardMarkup(row_width=1)
+        markup.add(
+            InlineKeyboardButton(f"{'✅' if curr_srv == 'mailtd' else '⬜'} Default Mail.td", callback_data="set_srv_mailtd"),
+            InlineKeyboardButton(f"{'✅' if curr_srv == 'tmailor' else '⬜'} Premium Tmailor.com", callback_data="set_srv_tmailor")
+        )
+        bot.edit_message_reply_markup(chat_id, call.message.message_id, reply_markup=markup)
             
     elif chat_id == ADMIN_ID:
         if call.data == "admin_back":
@@ -638,58 +691,80 @@ def handle_callback(call):
             bot.answer_callback_query(call.id, f"Bot is now {'ON' if system_data['bot_active'] else 'OFF'}")
             bot.edit_message_reply_markup(chat_id, call.message.message_id, reply_markup=get_admin_menu())
 
-        elif call.data == "admin_apis":
+        elif call.data == "admin_apis_select":
+            markup = InlineKeyboardMarkup(row_width=2)
+            markup.add(
+                InlineKeyboardButton("⚙️ Mail.td APIs", callback_data="admin_mngapi_mailtd"),
+                InlineKeyboardButton("⚙️ Tmailor.com APIs", callback_data="admin_mngapi_tmailor")
+            )
+            markup.add(InlineKeyboardButton("🔙 Back to Panel", callback_data="admin_back"))
+            bot.edit_message_text("🌐 <b>Select Server to Manage API:</b>", chat_id, call.message.message_id, reply_markup=markup)
+
+        elif call.data.startswith("admin_mngapi_"):
+            srv_type = call.data.split('_')[2]
             restore_apis()
             markup = InlineKeyboardMarkup(row_width=2)
             markup.add(
-                InlineKeyboardButton("➕ Add API Token", callback_data="admin_add_api"),
-                InlineKeyboardButton("🗑️ Delete API", callback_data="admin_del_api_list")
+                InlineKeyboardButton("➕ Add API Token", callback_data=f"admin_addapi_{srv_type}"),
+                InlineKeyboardButton("🗑️ Delete API", callback_data=f"admin_delapi_list_{srv_type}")
             )
-            markup.add(InlineKeyboardButton("🔙 Back to Panel", callback_data="admin_back"))
+            markup.add(InlineKeyboardButton("🔙 Back", callback_data="admin_apis_select"))
             
-            api_info = f"🔑 <b>API Limit Management</b>\n\n"
-            for i, token in enumerate(api_data.get('tokens', [])):
+            token_key = f"{srv_type}_tokens"
+            api_info = f"🔑 <b>{srv_type.capitalize()} Limit Management</b>\n\n"
+            for i, token in enumerate(api_data.get(token_key, [])):
                 usage = api_data['usage'].get(token, 0)
-                status = "🟢 Active"
-                if token in api_data['exhausted']:
-                    status = "🔴 Exhausted"
+                status = "🔴 Exhausted" if token in api_data['exhausted'] else "🟢 Active"
                 short_token = f"{token[:6]}...{token[-4:]}" if len(token) > 10 else token
                 api_info += f"<b>{i+1}.</b> <code>{short_token}</code>\n└ Ops: <b>{usage} / 1000</b> | {status}\n\n"
             bot.edit_message_text(api_info, chat_id, call.message.message_id, reply_markup=markup)
-            
-        elif call.data == "admin_add_api":
-            msg = bot.edit_message_text("➕ <b>Add New API Token</b>\n\nআপনার নতুন API Token টি টাইপ করে সেন্ড করুন:", chat_id, call.message.message_id, reply_markup=get_back_button())
-            bot.register_next_step_handler(msg, process_add_api)
-            
-        elif call.data == "admin_del_api_list":
+
+        elif call.data.startswith("admin_addapi_"):
+            srv_type = call.data.split('_')[2]
+            msg = bot.edit_message_text(f"➕ <b>Add New API Token for {srv_type.capitalize()}</b>\n\nআপনার নতুন API Token টি টাইপ করে সেন্ড করুন:", chat_id, call.message.message_id, reply_markup=get_back_button())
+            bot.register_next_step_handler(msg, lambda m: process_add_api(m, srv_type))
+
+        elif call.data.startswith("admin_delapi_list_"):
+            srv_type = call.data.split('_')[3]
             markup = InlineKeyboardMarkup(row_width=1)
-            for i, token in enumerate(api_data.get('tokens', [])):
+            token_key = f"{srv_type}_tokens"
+            for i, token in enumerate(api_data.get(token_key, [])):
                 short_token = f"{token[:6]}...{token[-4:]}" if len(token) > 10 else token
-                markup.add(InlineKeyboardButton(f"❌ Delete: {short_token}", callback_data=f"delapi_{i}"))
-            markup.add(InlineKeyboardButton("🔙 Back", callback_data="admin_apis"))
-            bot.edit_message_text("🗑️ <b>Select API to Delete:</b>", chat_id, call.message.message_id, reply_markup=markup)
+                markup.add(InlineKeyboardButton(f"❌ Delete: {short_token}", callback_data=f"delapi_{srv_type}_{i}"))
+            markup.add(InlineKeyboardButton("🔙 Back", callback_data=f"admin_mngapi_{srv_type}"))
+            bot.edit_message_text(f"🗑️ <b>Select {srv_type.capitalize()} API to Delete:</b>", chat_id, call.message.message_id, reply_markup=markup)
 
         elif call.data.startswith("delapi_"):
-            idx = int(call.data.split('_')[1])
-            if 0 <= idx < len(api_data['tokens']):
-                deleted_token = api_data['tokens'].pop(idx)
+            parts = call.data.split('_')
+            srv_type = parts[1]
+            idx = int(parts[2])
+            token_key = f"{srv_type}_tokens"
+            
+            if 0 <= idx < len(api_data.get(token_key, [])):
+                deleted_token = api_data[token_key].pop(idx)
                 if deleted_token in api_data['usage']: del api_data['usage'][deleted_token]
                 if deleted_token in api_data['exhausted']: del api_data['exhausted'][deleted_token]
                 save_system_data()
                 bot.answer_callback_query(call.id, "✅ API Deleted Successfully!", show_alert=True)
                 
                 markup = InlineKeyboardMarkup(row_width=1)
-                for i, token in enumerate(api_data.get('tokens', [])):
+                for i, token in enumerate(api_data.get(token_key, [])):
                     short_token = f"{token[:6]}...{token[-4:]}" if len(token) > 10 else token
-                    markup.add(InlineKeyboardButton(f"❌ Delete: {short_token}", callback_data=f"delapi_{i}"))
-                markup.add(InlineKeyboardButton("🔙 Back", callback_data="admin_apis"))
+                    markup.add(InlineKeyboardButton(f"❌ Delete: {short_token}", callback_data=f"delapi_{srv_type}_{i}"))
+                markup.add(InlineKeyboardButton("🔙 Back", callback_data=f"admin_mngapi_{srv_type}"))
                 bot.edit_message_reply_markup(chat_id, call.message.message_id, reply_markup=markup)
             
         elif call.data == "admin_stats":
             total_users = len(user_data)
             active_accounts = sum(len(d.get('accounts', [])) for d in user_data.values())
             
-            stats = f"📊 <b>Bot Live Statistics</b>\n\n👥 Total Users: <b>{total_users}</b>\n🚫 Suspended Users: <b>{len(banned_users)}</b>\n\n📧 Total Mails Gen: <b>{bot_stats['total_mails_generated']}</b>\n🟢 Current Active Mails: <b>{active_accounts}</b>"
+            mtd = tml = 0
+            for d in user_data.values():
+                for acc in d.get('accounts', []):
+                    if acc.get('server_type') == 'tmailor': tml += 1
+                    else: mtd += 1
+                    
+            stats = f"📊 <b>Bot Live Statistics</b>\n\n👥 Total Users: <b>{total_users}</b>\n🚫 Suspended Users: <b>{len(banned_users)}</b>\n\n📧 Total Mails Gen: <b>{bot_stats['total_mails_generated']}</b>\n🟢 Current Active Mails: <b>{active_accounts}</b>\n\n🌐 Server Usage Distribution:\n- MailTD Base: <b>{mtd}</b>\n- Tmailor Base: <b>{tml}</b>"
             bot.edit_message_text(stats, chat_id, call.message.message_id, reply_markup=get_back_button())
             
         elif call.data == "admin_users":
@@ -736,7 +811,7 @@ if __name__ == "__main__":
     load_all_data_from_firebase()
     threading.Thread(target=run_web_server, daemon=True).start()
     threading.Thread(target=auto_check_mail, daemon=True).start()
-    print("🚀 Pro Mail Bot (Fast MailTD Core + IG Fallback) is Live...")
+    print("🚀 Pro Mail Bot (Dual Server + Premium UI) is Live...")
     while True:
         try: bot.polling(none_stop=True, interval=0, timeout=20)
         except Exception: time.sleep(5)
