@@ -82,11 +82,21 @@ def load_all_data_from_firebase():
         api_doc = db.collection('system').document('api_data').get()
         if api_doc.exists: 
             loaded = api_doc.to_dict()
-            if 'mailtd_tokens' in loaded: api_data['mailtd_tokens'] = loaded['mailtd_tokens']
+            if 'mailtd_tokens' in loaded: 
+                api_data['mailtd_tokens'] = loaded['mailtd_tokens']
+            elif 'tokens' in loaded: 
+                api_data['mailtd_tokens'] = loaded['tokens'] # Migration fix
+                
             if 'tmailor_tokens' in loaded: api_data['tmailor_tokens'] = loaded['tmailor_tokens']
             if 'usage' in loaded: api_data['usage'] = loaded['usage']
             if 'exhausted' in loaded: api_data['exhausted'] = loaded['exhausted']
-            if 'active_idx' in loaded: api_data['active_idx'] = loaded['active_idx']
+            
+            # DB Migration Fix for active_idx
+            if 'active_idx' in loaded:
+                if isinstance(loaded['active_idx'], dict):
+                    api_data['active_idx'] = loaded['active_idx']
+                else:
+                    api_data['active_idx'] = {'mailtd': loaded.get('active_idx', 0), 'tmailor': 0}
             
         ban_doc = db.collection('system').document('banned_users').get()
         if ban_doc.exists: banned_users = set(ban_doc.to_dict().get('users', []))
@@ -144,7 +154,7 @@ def get_active_client(server_type='mailtd', exclude_tokens=None):
     
     if not valid_tokens: 
         if server_type == 'mailtd': raise Exception("All MailTD APIs Exhausted")
-        return None, "fallback_token" # Tmailor fallback logic allows working without explicit tokens
+        return None, "fallback_token" 
 
     idx = api_data['active_idx'].get(server_type, 0)
     for _ in range(len(api_data[token_key])):
@@ -202,8 +212,8 @@ def run_web_server(): app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 80
 
 # --- Premium Menus ---
 def get_main_menu(chat_id):
-    markup = ReplyKeyboardMarkup(resize_keyboard=True, row_width=2)
-    # Beautifully arranged position
+    markup = ReplyKeyboardMarkup(resize_keyboard=True)
+    # Beautiful & Premium Positioned Layout
     markup.row(KeyboardButton("✨ Generate Premium Mail"))
     markup.row(KeyboardButton("✏️ Custom ID"), KeyboardButton("🌐 Server Change"))
     markup.row(KeyboardButton("🏠 Dashboard"), KeyboardButton("🗑️ Delete Mail"))
@@ -303,12 +313,11 @@ def extract_and_format(subject, text_body, html_body=""):
 
 def generate_mail_layout(email_address, srv_type):
     server_name = "Premium Mail.td API" if srv_type == 'mailtd' else "Premium Tmailor.com"
-    # Premium layout with Code-Block to enable native tap-to-copy
+    # Native tap-to-copy enabled with <code> tag, no inline button needed
     layout = f"🎉 <b>Premium Mail Generated!</b>\n\n📧 <b>Your Address :</b>\n<blockquote><code>{email_address}</code></blockquote>\n<i>(Tap the address above to copy securely)</i>\n\n📡 <b>Server :</b> {server_name}\n🟢 <b>Status :</b> Live Sync Active\n\n<blockquote>•  Listening for incoming mails... ⏳</blockquote>"
     
     markup = InlineKeyboardMarkup(row_width=2)
-    # The button triggers a silent copy confirmation, no blocking pop-ups!
-    markup.add(InlineKeyboardButton(f"📋 {email_address}", callback_data=f"cp_{email_address}"))
+    # Mail copy button explicitly removed as per request
     markup.add(InlineKeyboardButton("🔄 Switch Mail", callback_data="quick_switch"), InlineKeyboardButton("🔄 Force Sync", callback_data="force_fetch"))
     return layout, markup
 
@@ -389,6 +398,7 @@ def auto_check_mail():
                             
                             markup = InlineKeyboardMarkup(row_width=2)
                             row = []
+                            # Keeping the OTP Copy Button as requested
                             if extracted_otp:
                                 row.append(InlineKeyboardButton(f"📋 {extracted_otp}", callback_data=f"cp_{extracted_otp}"))
                             if verify_link:
@@ -635,9 +645,9 @@ def handle_callback(call):
     chat_id = str(call.message.chat.id)
     if is_banned(chat_id): return
     
-    # Silent Toast for Mail & OTP Copy!
+    # OTP Copy confirmation
     if call.data.startswith('cp_'):
-        bot.answer_callback_query(call.id, "✅ Copied!", show_alert=False)
+        bot.answer_callback_query(call.id, "✅ Code Copied!", show_alert=False)
 
     elif call.data == "cancel_custom":
         bot.clear_step_handler_by_chat_id(call.message.chat.id)
