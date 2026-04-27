@@ -46,7 +46,7 @@ api_data = {
         'td_1d45403d07853397e061d49f21c1fa9e0a80816e0005401a11bdf84218d496ee',  
         'td_4af40882b5019f9be105e7b4e3beeeaf1cffd81060fc383d824622c4470d73f0'  
     ],
-    'tmailor_tokens': [], # Admin can manage Tmailor API here
+    'tmailor_tokens': [], 
     'active_idx': {'mailtd': 0, 'tmailor': 0},
     'usage': {},
     'exhausted': {}
@@ -85,13 +85,12 @@ def load_all_data_from_firebase():
             if 'mailtd_tokens' in loaded: 
                 api_data['mailtd_tokens'] = loaded['mailtd_tokens']
             elif 'tokens' in loaded: 
-                api_data['mailtd_tokens'] = loaded['tokens'] # Migration fix
+                api_data['mailtd_tokens'] = loaded['tokens'] 
                 
             if 'tmailor_tokens' in loaded: api_data['tmailor_tokens'] = loaded['tmailor_tokens']
             if 'usage' in loaded: api_data['usage'] = loaded['usage']
             if 'exhausted' in loaded: api_data['exhausted'] = loaded['exhausted']
             
-            # DB Migration Fix for active_idx
             if 'active_idx' in loaded:
                 if isinstance(loaded['active_idx'], dict):
                     api_data['active_idx'] = loaded['active_idx']
@@ -195,7 +194,6 @@ def create_mail_with_server(chat_id, clean_name=None):
                     raise Exception("NameTaken")
                 if 'token' in locals(): failed_tokens.add(token)
 
-        # Auto fallback to Tmailor if all MailTD fail
         preferred = 'tmailor'
 
     if preferred == 'tmailor':
@@ -213,7 +211,6 @@ def run_web_server(): app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 80
 # --- Premium Menus ---
 def get_main_menu(chat_id):
     markup = ReplyKeyboardMarkup(resize_keyboard=True)
-    # Beautiful & Premium Positioned Layout
     markup.row(KeyboardButton("✨ Generate Premium Mail"))
     markup.row(KeyboardButton("✏️ Custom ID"), KeyboardButton("🌐 Server Change"))
     markup.row(KeyboardButton("🏠 Dashboard"), KeyboardButton("🗑️ Delete Mail"))
@@ -295,11 +292,18 @@ def extract_and_format(subject, text_body, html_body=""):
     
     search_text = f"{subject_text}\n{clean_text}\n{clean_html}"
     
-    otp_match = re.search(r'(?<!\d)(\d{6})(?!\d)|\b([A-Za-z]{4,12})\b', search_text)
-    
     extracted_otp = ""
-    if otp_match:
-        extracted_otp = next((g for g in otp_match.groups() if g), "").strip()
+    
+    # 1. First priority: Strict 6-Digit Match (e.g. 085530 for IG)
+    six_digit_match = re.search(r'(?<!\d)(\d{6})(?!\d)', search_text)
+    
+    if six_digit_match:
+        extracted_otp = six_digit_match.group(1)
+    else:
+        # 2. Second priority: Uppercase Alpha-Numeric Promo Codes (Avoids normal words like "Verify")
+        promo_match = re.search(r'\b([A-Z0-9]{5,12})\b', search_text)
+        if promo_match and not promo_match.group(1).isdigit():
+            extracted_otp = promo_match.group(1)
 
     link_match = re.search(r'(https?://[^\s\"\'<>]+)', search_text)
     extracted_link = link_match.group(1) if link_match else None
@@ -313,11 +317,9 @@ def extract_and_format(subject, text_body, html_body=""):
 
 def generate_mail_layout(email_address, srv_type):
     server_name = "Premium Mail.td API" if srv_type == 'mailtd' else "Premium Tmailor.com"
-    # Native tap-to-copy enabled with <code> tag, no inline button needed
     layout = f"🎉 <b>Premium Mail Generated!</b>\n\n📧 <b>Your Address :</b>\n<blockquote><code>{email_address}</code></blockquote>\n<i>(Tap the address above to copy securely)</i>\n\n📡 <b>Server :</b> {server_name}\n🟢 <b>Status :</b> Live Sync Active\n\n<blockquote>•  Listening for incoming mails... ⏳</blockquote>"
     
     markup = InlineKeyboardMarkup(row_width=2)
-    # Mail copy button explicitly removed as per request
     markup.add(InlineKeyboardButton("🔄 Switch Mail", callback_data="quick_switch"), InlineKeyboardButton("🔄 Force Sync", callback_data="force_fetch"))
     return layout, markup
 
@@ -398,7 +400,7 @@ def auto_check_mail():
                             
                             markup = InlineKeyboardMarkup(row_width=2)
                             row = []
-                            # Keeping the OTP Copy Button as requested
+                            
                             if extracted_otp:
                                 row.append(InlineKeyboardButton(f"📋 {extracted_otp}", callback_data=f"cp_{extracted_otp}"))
                             if verify_link:
@@ -458,7 +460,6 @@ def handle_text(message):
     if text == "✨ Generate Premium Mail":
         if check_anti_spam(chat_id): return
         
-        # Super Premium 3-Step Loading Animation
         anim_msg = bot.send_message(chat_id, "<i>🔄 Establishing Secure Protocol...</i>")
         time.sleep(0.4)
         bot.edit_message_text("<i>🛡️ Bypassing Spam Filters...</i>", chat_id, anim_msg.message_id)
@@ -645,7 +646,6 @@ def handle_callback(call):
     chat_id = str(call.message.chat.id)
     if is_banned(chat_id): return
     
-    # OTP Copy confirmation
     if call.data.startswith('cp_'):
         bot.answer_callback_query(call.id, "✅ Code Copied!", show_alert=False)
 
