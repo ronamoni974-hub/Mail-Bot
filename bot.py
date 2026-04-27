@@ -104,7 +104,6 @@ def load_all_data_from_firebase():
 def get_fallback_domain():
     try:
         resp = requests.get("https://www.1secmail.com/api/v1/?action=getDomainList", timeout=5).json()
-        # Prefer IG friendly domains
         for d in ['esiix.com', 'xojxe.com', 'yoggm.com']:
             if d in resp: return d
         return resp[0]
@@ -166,7 +165,6 @@ def create_mail_with_fallback(clean_name=None):
                 raise Exception("NameTaken")
             if 'token' in locals(): failed_tokens.add(token)
 
-    # All MailTD failed, Auto Fallback to high-quality secondary server
     domain = get_fallback_domain()
     email_addr = f"{clean_name}@{domain}" if clean_name else f"{''.join(random.choices(string.ascii_lowercase + string.digits, k=10))}@{domain}"
     return "fallback_acc", email_addr, "fallback_token", 'fallback'
@@ -177,13 +175,16 @@ app = Flask('')
 def home(): return "Pro Mail Bot is Running 24/7!"
 def run_web_server(): app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 8080)))
 
-# --- Menus ---
+# --- Premium Menus ---
 def get_main_menu(chat_id):
-    markup = ReplyKeyboardMarkup(resize_keyboard=True)
-    markup.row(KeyboardButton("✨ Generate Premium Mail"), KeyboardButton("✏️ Custom ID"))
-    markup.row(KeyboardButton("🏠 Dashboard"), KeyboardButton("🗑️ Delete Mail"))
-    markup.row(KeyboardButton("👤 My Profile"), KeyboardButton("⚡ About System"))
-    if str(chat_id) == ADMIN_ID: markup.row(KeyboardButton("⚙️ Admin Panel"))
+    markup = ReplyKeyboardMarkup(resize_keyboard=True, row_width=2)
+    # Premium Layout Grid
+    markup.add(KeyboardButton("✨ Generate Premium Mail"))
+    markup.add(KeyboardButton("✏️ Custom ID"), KeyboardButton("🏠 Dashboard"))
+    markup.add(KeyboardButton("👤 My Profile"), KeyboardButton("🗑️ Delete Mail"))
+    markup.add(KeyboardButton("⚡ About System"))
+    if str(chat_id) == ADMIN_ID: 
+        markup.add(KeyboardButton("⚙️ Admin Panel"))
     return markup
 
 def get_admin_menu():
@@ -278,7 +279,11 @@ def extract_and_format(subject, text_body, html_body=""):
 def generate_mail_layout(email_address, srv_type):
     server_name = "Premium MailTD API" if srv_type == 'mailtd' else "Fallback API (Fast)"
     layout = f"🎉 <b>Mail Generated Successfully!</b>\n\n📧 <b>Your Address :</b>\n<code>{email_address}</code>\n\n📡 <b>Server :</b> {server_name}\n🟢 <b>Status :</b> Live Sync Active\n\n<blockquote>•  Listening for incoming mails... ⏳</blockquote>"
-    markup = InlineKeyboardMarkup(row_width=2).add(InlineKeyboardButton("🔄 Switch Mail", callback_data="quick_switch"), InlineKeyboardButton("🔄 Force Sync", callback_data="force_fetch"))
+    
+    markup = InlineKeyboardMarkup(row_width=2)
+    # Inline 1-Tap Copy Button added here
+    markup.add(InlineKeyboardButton(f"📋 Copy: {email_address}", callback_data="cpm_copy"))
+    markup.add(InlineKeyboardButton("🔄 Switch Mail", callback_data="quick_switch"), InlineKeyboardButton("🔄 Force Sync", callback_data="force_fetch"))
     return layout, markup
 
 # --- Auto Checker Engine ---
@@ -417,9 +422,12 @@ def handle_text(message):
     if text == "✨ Generate Premium Mail":
         if check_anti_spam(chat_id): return
         
-        anim_msg = bot.send_message(chat_id, "<i>✨ Initialize Handshake...</i>")
-        time.sleep(0.5)
-        bot.edit_message_text("<i>⚡ Allocating Secure Server...</i>", chat_id, anim_msg.message_id)
+        # Premium 3-Step Loading Animation
+        anim_msg = bot.send_message(chat_id, "<i>🔄 Initializing Handshake...</i>")
+        time.sleep(0.4)
+        bot.edit_message_text("<i>🛡️ Securing Connection & Bypassing Spam...</i>", chat_id, anim_msg.message_id)
+        time.sleep(0.4)
+        bot.edit_message_text("<i>⚡ Allocating Premium Server...</i>", chat_id, anim_msg.message_id)
         
         try:
             acc_id, email_addr, used_token, srv_type = create_mail_with_fallback(clean_name=None)
@@ -587,9 +595,11 @@ def handle_callback(call):
     chat_id = str(call.message.chat.id)
     if is_banned(chat_id): return
     
-    if call.data.startswith('cp_'):
-        # Silent toast, no blocking pop-up
-        bot.answer_callback_query(call.id, "✅ Copied!", show_alert=False)
+    # Handling Silent Copies
+    if call.data == "cpm_copy":
+        bot.answer_callback_query(call.id, "✅ Mail Address Copied!", show_alert=False)
+    elif call.data.startswith('cp_'):
+        bot.answer_callback_query(call.id, "✅ Code Copied!", show_alert=False)
 
     elif call.data == "cancel_custom":
         bot.clear_step_handler_by_chat_id(call.message.chat.id)
@@ -668,7 +678,6 @@ def handle_callback(call):
                 save_system_data()
                 bot.answer_callback_query(call.id, "✅ API Deleted Successfully!", show_alert=True)
                 
-                # Re-render list
                 markup = InlineKeyboardMarkup(row_width=1)
                 for i, token in enumerate(api_data.get('tokens', [])):
                     short_token = f"{token[:6]}...{token[-4:]}" if len(token) > 10 else token
