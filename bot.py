@@ -346,18 +346,21 @@ def extract_and_format(subject, text_body, html_body=""):
 def generate_mail_layout(email_address, srv_type):
     server_name = "Premium Mail.td API" if srv_type == 'mailtd' else "Premium Tmailor.com"
     
-    # Large, clear email block for simple tap-to-copy
+    # Clean Double-lined box for Email (Touch to copy using <code>)
     layout = (
         f"🎉 <b>Premium Mail Generated!</b>\n\n"
-        f"📧 <b>Your Address :</b>\n\n"
-        f"<code>{email_address}</code>\n\n"
-        f"<i>(Tap the address above to copy)</i>\n\n"
+        f"📧 <b>Your Address :</b>\n"
+        f"╔════════════════════════╗\n"
+        f"   <code>{email_address}</code>\n"
+        f"╚════════════════════════╝\n"
+        f"<i>(Tap the address inside the box to copy)</i>\n\n"
         f"📡 <b>Server :</b> {server_name}\n"
         f"🟢 <b>Status :</b> Live Sync Active\n\n"
         f"<blockquote>•  Listening for incoming mails... ⏳</blockquote>"
     )
     
     markup = InlineKeyboardMarkup(row_width=2)
+    # Inline Copy Button Removed. Only Sync/Switch.
     markup.add(InlineKeyboardButton("🔄 Switch Mail", callback_data="quick_switch"), InlineKeyboardButton("🔄 Force Sync", callback_data="force_fetch"))
     return layout, markup
 
@@ -431,18 +434,20 @@ def auto_check_mail():
                                 f"╰ 📌 Sub: {html.escape(msg_data['subject'][:25])}\n\n"
                             )
                             
+                            # Clean Double-lined box for OTP Code (Touch to copy using <code>)
                             if extracted_otp:
                                 mail_alert += (
-                                    f"🔑 <b>Code:</b> <code>{extracted_otp}</code>\n\n"
+                                    f"🔑 <b>Verification Code:</b>\n"
+                                    f"╔════════════════════════╗\n"
+                                    f"   <code>{extracted_otp}</code>\n"
+                                    f"╚════════════════════════╝\n\n"
                                 )
                                 
                             mail_alert += f"<blockquote>💬 {smart_body[:400]}...</blockquote>"
                             
                             markup = InlineKeyboardMarkup(row_width=2)
                             row = []
-                            # Inline Button Added for OTP as requested
-                            if extracted_otp:
-                                row.append(InlineKeyboardButton(f"📋 {extracted_otp}", callback_data=f"cp_{extracted_otp}"))
+                            # Inline Copy Button Removed. Native Text Tap-to-Copy Handles it.
                             if verify_link:
                                 row.append(InlineKeyboardButton("🔗 Open Link", url=verify_link))
                                 
@@ -653,9 +658,8 @@ def process_unban(message):
     bot.send_message(message.chat.id, f"✅ <b>{message.text}</b> অ্যাকাউন্ট অ্যাক্টিভ করা হয়েছে!", reply_markup=get_back_button())
 
 def process_promo_text(message):
-    bot.clear_step_handler_by_chat_id(message.chat.id)
     msg = bot.send_message(message.chat.id, "🔗 বাটনের জন্য লিংক দিন (না দিতে চাইলে 'no' লিখুন):")
-    bot.register_next_step_handler(msg, broadcast_promo, promo_message=message)
+    bot.register_next_step_handler(msg, lambda m: broadcast_promo(m, message))
 
 def broadcast_promo(button_message, promo_message):
     link = button_message.text.strip()
@@ -683,12 +687,8 @@ def broadcast_promo(button_message, promo_message):
 def handle_callback(call):
     chat_id = str(call.message.chat.id)
     if is_banned(chat_id): return
-    
-    if call.data.startswith('cp_'):
-        otp = call.data.split('_')[1]
-        bot.answer_callback_query(call.id, f"✅ Code {otp} Copied!", show_alert=False)
 
-    elif call.data == "cancel_custom":
+    if call.data == "cancel_custom":
         bot.clear_step_handler_by_chat_id(call.message.chat.id)
         for msg_id in user_data.get(chat_id, {}).get('custom_mail_msgs', []):
             try: bot.delete_message(chat_id, msg_id)
@@ -861,7 +861,7 @@ if __name__ == "__main__":
     load_all_data_from_firebase()
     threading.Thread(target=run_web_server, daemon=True).start()
     threading.Thread(target=auto_check_mail, daemon=True).start()
-    print("🚀 Pro Mail Bot (Dual Server + Anti-ban Admin) is Live...")
+    print("🚀 Pro Mail Bot (Dual Server + Native Touch Copy) is Live...")
     while True:
         try: bot.polling(none_stop=True, interval=0, timeout=20)
         except Exception: time.sleep(5)
