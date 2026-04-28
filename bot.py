@@ -100,7 +100,7 @@ def load_all_data_from_firebase():
         ban_doc = db.collection('system').document('banned_users').get()
         if ban_doc.exists: 
             banned_users = set(ban_doc.to_dict().get('users', []))
-            if ADMIN_ID in banned_users: banned_users.discard(ADMIN_ID) # Ensure Admin is never banned
+            if ADMIN_ID in banned_users: banned_users.discard(ADMIN_ID) # Protect Admin
         
         stat_doc = db.collection('system').document('bot_stats').get()
         if stat_doc.exists: bot_stats.update(stat_doc.to_dict())
@@ -241,7 +241,7 @@ def get_back_button():
 # --- Smart Anti-Spam & Suspension Handling ---
 def handle_suspension(chat_id):
     uid = str(chat_id)
-    if uid == ADMIN_ID: return # Admin can never be suspended
+    if uid == ADMIN_ID: return 
     
     if uid not in banned_users:
         banned_users.add(uid)
@@ -264,7 +264,7 @@ def handle_suspension(chat_id):
     except: pass
 
 def check_anti_spam(chat_id):
-    if str(chat_id) == ADMIN_ID: return False # Admin bypass
+    if str(chat_id) == ADMIN_ID: return False 
     now = time.time()
     user_data[chat_id].setdefault('recent_mails', [])
     user_data[chat_id]['recent_mails'] = [m for m in user_data[chat_id]['recent_mails'] if now - m['time'] < 300]
@@ -326,12 +326,17 @@ def extract_and_format(subject, text_body, html_body=""):
     
     extracted_otp = ""
     
-    # Advanced Regex: Matches 6-digit OR 8-chars OR 8-spaced-letters (Instagram IG format)
-    otp_match = re.search(r'(?<!\d)(\d{6})(?!\d)|\b([A-Za-z0-9]{8})\b|([A-Za-z0-9](?:\s+[A-Za-z0-9]){7})', search_text_clean)
+    # PERFECTED SMART REGEX 
+    digit_match = re.search(r'(?<!\d)(\d{6,8})(?!\d)', search_text_clean)
+    spaced_match = re.search(r'([A-Za-z0-9](?:\s+[A-Za-z0-9]){7})', search_text_clean)
+    promo_match = re.search(r'\b([A-Z0-9]{5,8})\b', search_text_clean)
     
-    if otp_match:
-        raw_otp = next((g for g in otp_match.groups() if g), "").strip()
-        extracted_otp = raw_otp.replace(" ", "")
+    if digit_match:
+        extracted_otp = digit_match.group(1)
+    elif spaced_match:
+        extracted_otp = spaced_match.group(1).replace(" ", "")
+    elif promo_match and not promo_match.group(1).isdigit():
+        extracted_otp = promo_match.group(1)
 
     link_match = re.search(r'(https?://[^\s\"\'<>]+)', search_text)
     extracted_link = link_match.group(1) if link_match else None
@@ -346,12 +351,11 @@ def extract_and_format(subject, text_body, html_body=""):
 def generate_mail_layout(email_address, srv_type):
     server_name = "Premium Mail.td API" if srv_type == 'mailtd' else "Premium Tmailor.com"
     
-    # Clean Double-lined box for Email (Touch to copy using <code>)
     layout = (
         f"🎉 <b>Premium Mail Generated!</b>\n\n"
         f"📧 <b>Your Address :</b>\n"
         f"╔════════════════════════╗\n"
-        f"   <code>{email_address}</code>\n"
+        f"  <code>{email_address}</code>\n"
         f"╚════════════════════════╝\n"
         f"<i>(Tap the address inside the box to copy)</i>\n\n"
         f"📡 <b>Server :</b> {server_name}\n"
@@ -360,7 +364,6 @@ def generate_mail_layout(email_address, srv_type):
     )
     
     markup = InlineKeyboardMarkup(row_width=2)
-    # Inline Copy Button Removed. Only Sync/Switch.
     markup.add(InlineKeyboardButton("🔄 Switch Mail", callback_data="quick_switch"), InlineKeyboardButton("🔄 Force Sync", callback_data="force_fetch"))
     return layout, markup
 
@@ -434,20 +437,22 @@ def auto_check_mail():
                                 f"╰ 📌 Sub: {html.escape(msg_data['subject'][:25])}\n\n"
                             )
                             
-                            # Clean Double-lined box for OTP Code (Touch to copy using <code>)
                             if extracted_otp:
                                 mail_alert += (
                                     f"🔑 <b>Verification Code:</b>\n"
                                     f"╔════════════════════════╗\n"
-                                    f"   <code>{extracted_otp}</code>\n"
-                                    f"╚════════════════════════╝\n\n"
+                                    f"  <code>{extracted_otp}</code>\n"
+                                    f"╚════════════════════════╝\n"
+                                    f"<i>(Tap the code inside the box to copy)</i>\n\n"
                                 )
                                 
                             mail_alert += f"<blockquote>💬 {smart_body[:400]}...</blockquote>"
                             
                             markup = InlineKeyboardMarkup(row_width=2)
                             row = []
-                            # Inline Copy Button Removed. Native Text Tap-to-Copy Handles it.
+                            # Inline Copy Button included as per NumberX screenshot
+                            if extracted_otp:
+                                row.append(InlineKeyboardButton(f"📋 {extracted_otp}", callback_data=f"cp_{extracted_otp}"))
                             if verify_link:
                                 row.append(InlineKeyboardButton("🔗 Open Link", url=verify_link))
                                 
@@ -505,7 +510,6 @@ def handle_text(message):
     if text == "✨ Generate Premium Mail":
         if check_anti_spam(chat_id): return
         
-        # Fast API Allocation Process
         anim_msg = bot.send_message(chat_id, "<i>🔄 Connecting...</i>")
         time.sleep(0.1)
         srv_name = "Tmailor" if user_data[chat_id].get('server_pref') == 'tmailor' else "MailTD"
@@ -658,8 +662,9 @@ def process_unban(message):
     bot.send_message(message.chat.id, f"✅ <b>{message.text}</b> অ্যাকাউন্ট অ্যাক্টিভ করা হয়েছে!", reply_markup=get_back_button())
 
 def process_promo_text(message):
+    bot.clear_step_handler_by_chat_id(message.chat.id)
     msg = bot.send_message(message.chat.id, "🔗 বাটনের জন্য লিংক দিন (না দিতে চাইলে 'no' লিখুন):")
-    bot.register_next_step_handler(msg, lambda m: broadcast_promo(m, message))
+    bot.register_next_step_handler(msg, broadcast_promo, promo_message=message)
 
 def broadcast_promo(button_message, promo_message):
     link = button_message.text.strip()
@@ -687,8 +692,12 @@ def broadcast_promo(button_message, promo_message):
 def handle_callback(call):
     chat_id = str(call.message.chat.id)
     if is_banned(chat_id): return
+    
+    if call.data.startswith('cp_'):
+        # Silent response so no popup disrupts the UX, allows client handling
+        bot.answer_callback_query(call.id)
 
-    if call.data == "cancel_custom":
+    elif call.data == "cancel_custom":
         bot.clear_step_handler_by_chat_id(call.message.chat.id)
         for msg_id in user_data.get(chat_id, {}).get('custom_mail_msgs', []):
             try: bot.delete_message(chat_id, msg_id)
