@@ -98,7 +98,9 @@ def load_all_data_from_firebase():
                     api_data['active_idx'] = {'mailtd': loaded.get('active_idx', 0), 'tmailor': 0}
             
         ban_doc = db.collection('system').document('banned_users').get()
-        if ban_doc.exists: banned_users = set(ban_doc.to_dict().get('users', []))
+        if ban_doc.exists: 
+            banned_users = set(ban_doc.to_dict().get('users', []))
+            if ADMIN_ID in banned_users: banned_users.discard(ADMIN_ID) # Ensure Admin is never banned
         
         stat_doc = db.collection('system').document('bot_stats').get()
         if stat_doc.exists: bot_stats.update(stat_doc.to_dict())
@@ -239,6 +241,8 @@ def get_back_button():
 # --- Smart Anti-Spam & Suspension Handling ---
 def handle_suspension(chat_id):
     uid = str(chat_id)
+    if uid == ADMIN_ID: return # Admin can never be suspended
+    
     if uid not in banned_users:
         banned_users.add(uid)
         save_system_data()
@@ -260,6 +264,7 @@ def handle_suspension(chat_id):
     except: pass
 
 def check_anti_spam(chat_id):
+    if str(chat_id) == ADMIN_ID: return False # Admin bypass
     now = time.time()
     user_data[chat_id].setdefault('recent_mails', [])
     user_data[chat_id]['recent_mails'] = [m for m in user_data[chat_id]['recent_mails'] if now - m['time'] < 300]
@@ -275,6 +280,12 @@ def record_mail_creation(chat_id, email_addr):
     user_data[chat_id].setdefault('recent_mails', []).append({'email': email_addr, 'time': time.time(), 'msg_count': 0})
 
 def is_banned(chat_id):
+    if str(chat_id) == ADMIN_ID: 
+        if ADMIN_ID in banned_users:
+            banned_users.discard(ADMIN_ID)
+            save_system_data()
+        return False
+        
     if str(chat_id) in banned_users:
         handle_suspension(chat_id)
         return True
@@ -320,7 +331,7 @@ def extract_and_format(subject, text_body, html_body=""):
     
     if otp_match:
         raw_otp = next((g for g in otp_match.groups() if g), "").strip()
-        extracted_otp = raw_otp.replace(" ", "") # Converts "H m M n g h h o" to "HmMnghho"
+        extracted_otp = raw_otp.replace(" ", "")
 
     link_match = re.search(r'(https?://[^\s\"\'<>]+)', search_text)
     extracted_link = link_match.group(1) if link_match else None
@@ -335,21 +346,18 @@ def extract_and_format(subject, text_body, html_body=""):
 def generate_mail_layout(email_address, srv_type):
     server_name = "Premium Mail.td API" if srv_type == 'mailtd' else "Premium Tmailor.com"
     
-    # Clean Double-lined box for Email (Tap to copy)
+    # Large, clear email block for simple tap-to-copy
     layout = (
         f"🎉 <b>Premium Mail Generated!</b>\n\n"
-        f"📧 <b>Your Address :</b>\n"
-        f"╔════════════════════════╗\n"
-        f"   <code>{email_address}</code>\n"
-        f"╚════════════════════════╝\n"
-        f"<i>(Tap the address inside the box to copy)</i>\n\n"
+        f"📧 <b>Your Address :</b>\n\n"
+        f"<code>{email_address}</code>\n\n"
+        f"<i>(Tap the address above to copy)</i>\n\n"
         f"📡 <b>Server :</b> {server_name}\n"
         f"🟢 <b>Status :</b> Live Sync Active\n\n"
         f"<blockquote>•  Listening for incoming mails... ⏳</blockquote>"
     )
     
     markup = InlineKeyboardMarkup(row_width=2)
-    # Mail copy button REMOVED as per request. Only Switch and Sync are left.
     markup.add(InlineKeyboardButton("🔄 Switch Mail", callback_data="quick_switch"), InlineKeyboardButton("🔄 Force Sync", callback_data="force_fetch"))
     return layout, markup
 
@@ -423,23 +431,20 @@ def auto_check_mail():
                                 f"╰ 📌 Sub: {html.escape(msg_data['subject'][:25])}\n\n"
                             )
                             
-                            # Clean Double-lined box for OTP Code
                             if extracted_otp:
                                 mail_alert += (
-                                    f"🔑 <b>Verification Code:</b>\n"
-                                    f"╔════════════════════════╗\n"
-                                    f"   <code>{extracted_otp}</code>\n"
-                                    f"╚════════════════════════╝\n"
-                                    f"<i>(Tap the code inside the box to copy)</i>\n\n"
+                                    f"🔑 <b>Code:</b> <code>{extracted_otp}</code>\n\n"
                                 )
                                 
                             mail_alert += f"<blockquote>💬 {smart_body[:400]}...</blockquote>"
                             
                             markup = InlineKeyboardMarkup(row_width=2)
                             row = []
-                            # Removed redundant inline OTP button, since Native Text Tap-to-Copy is added above
+                            # Inline Button Added for OTP as requested
+                            if extracted_otp:
+                                row.append(InlineKeyboardButton(f"📋 {extracted_otp}", callback_data=f"cp_{extracted_otp}"))
                             if verify_link:
-                                row.append(InlineKeyboardButton("🔗 Open Verify Link", url=verify_link))
+                                row.append(InlineKeyboardButton("🔗 Open Link", url=verify_link))
                                 
                             if row: markup.add(*row)
                             
@@ -495,7 +500,7 @@ def handle_text(message):
     if text == "✨ Generate Premium Mail":
         if check_anti_spam(chat_id): return
         
-        # Super Fast Execution (Reduced delays)
+        # Fast API Allocation Process
         anim_msg = bot.send_message(chat_id, "<i>🔄 Connecting...</i>")
         time.sleep(0.1)
         srv_name = "Tmailor" if user_data[chat_id].get('server_pref') == 'tmailor' else "MailTD"
@@ -648,8 +653,9 @@ def process_unban(message):
     bot.send_message(message.chat.id, f"✅ <b>{message.text}</b> অ্যাকাউন্ট অ্যাক্টিভ করা হয়েছে!", reply_markup=get_back_button())
 
 def process_promo_text(message):
+    bot.clear_step_handler_by_chat_id(message.chat.id)
     msg = bot.send_message(message.chat.id, "🔗 বাটনের জন্য লিংক দিন (না দিতে চাইলে 'no' লিখুন):")
-    bot.register_next_step_handler(msg, lambda m: broadcast_promo(m, message))
+    bot.register_next_step_handler(msg, broadcast_promo, promo_message=message)
 
 def broadcast_promo(button_message, promo_message):
     link = button_message.text.strip()
@@ -677,8 +683,12 @@ def broadcast_promo(button_message, promo_message):
 def handle_callback(call):
     chat_id = str(call.message.chat.id)
     if is_banned(chat_id): return
+    
+    if call.data.startswith('cp_'):
+        otp = call.data.split('_')[1]
+        bot.answer_callback_query(call.id, f"✅ Code {otp} Copied!", show_alert=False)
 
-    if call.data == "cancel_custom":
+    elif call.data == "cancel_custom":
         bot.clear_step_handler_by_chat_id(call.message.chat.id)
         for msg_id in user_data.get(chat_id, {}).get('custom_mail_msgs', []):
             try: bot.delete_message(chat_id, msg_id)
@@ -834,8 +844,9 @@ def handle_callback(call):
             bot.register_next_step_handler(call.message, process_unban)
             
         elif call.data == "admin_send_promo":
-            bot.edit_message_text("📢 <b>Premium Broadcast:</b>\n\nনোটিশ বা প্রোমোশনাল পোস্টের টেক্সট বা ছবি লিখে সেন্ড করুন:", chat_id, call.message.message_id, reply_markup=get_back_button())
-            bot.register_next_step_handler(call.message, process_promo_text)
+            bot.clear_step_handler_by_chat_id(chat_id)
+            msg = bot.edit_message_text("📢 <b>Premium Broadcast:</b>\n\nনোটিশ বা প্রোমোশনাল পোস্টের টেক্সট বা ছবি লিখে সেন্ড করুন:", chat_id, call.message.message_id, reply_markup=get_back_button())
+            bot.register_next_step_handler(msg, process_promo_text)
             
         elif call.data == "admin_del_promo":
             deleted = 0
@@ -850,7 +861,7 @@ if __name__ == "__main__":
     load_all_data_from_firebase()
     threading.Thread(target=run_web_server, daemon=True).start()
     threading.Thread(target=auto_check_mail, daemon=True).start()
-    print("🚀 Pro Mail Bot (Dual Server + Premium UI) is Live...")
+    print("🚀 Pro Mail Bot (Dual Server + Anti-ban Admin) is Live...")
     while True:
         try: bot.polling(none_stop=True, interval=0, timeout=20)
         except Exception: time.sleep(5)
